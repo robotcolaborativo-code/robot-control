@@ -18,54 +18,53 @@ def setup_database():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Verificar si las tablas existen
-        cursor.execute("SHOW TABLES LIKE 'comandos_robot'")
-        if not cursor.fetchone():
-            cursor.execute('''
-                CREATE TABLE comandos_robot (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    esp32_id VARCHAR(50),
-                    comando VARCHAR(100),
-                    parametros TEXT,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            print("✅ Tabla comandos_robot creada")
+        # ELIMINAR tablas si existen (para empezar fresco)
+        cursor.execute("DROP TABLE IF EXISTS comandos_robot")
+        cursor.execute("DROP TABLE IF EXISTS moduls_tellis")
         
-        cursor.execute("SHOW TABLES LIKE 'moduls_tellis'")
-        if not cursor.fetchone():
-            cursor.execute('''
-                CREATE TABLE moduls_tellis (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    esp32_id VARCHAR(50),
-                    motores_activos BOOLEAN,
-                    emergency_stop BOOLEAN,
-                    posicion_m1 INT,
-                    posicion_m2 INT,
-                    posicion_m3 INT,
-                    posicion_m4 INT,
-                    garra_abierta BOOLEAN
-                )
-            ''')
-            print("✅ Tabla moduls_tellis creada")
-            
-            # Insertar datos iniciales
-            cursor.execute('''
-                INSERT INTO moduls_tellis 
-                (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta) 
-                VALUES 
-                ('CDBOT_001', 1, 0, 100, 200, 150, 250, 1)
-            ''')
-            print("✅ Datos de ejemplo insertados")
+        # CREAR tabla comandos_robot con AUTO_INCREMENT
+        cursor.execute('''
+            CREATE TABLE comandos_robot (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                esp32_id VARCHAR(50),
+                comando VARCHAR(100),
+                parametros TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # CREAR tabla moduls_tellis con AUTO_INCREMENT
+        cursor.execute('''
+            CREATE TABLE moduls_tellis (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                esp32_id VARCHAR(50),
+                motores_activos BOOLEAN,
+                emergency_stop BOOLEAN,
+                posicion_m1 INT,
+                posicion_m2 INT,
+                posicion_m3 INT,
+                posicion_m4 INT,
+                garra_abierta BOOLEAN
+            )
+        ''')
+        
+        # INSERTAR datos de ejemplo
+        cursor.execute('''
+            INSERT INTO moduls_tellis 
+            (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta) 
+            VALUES 
+            ('CDBOT_001', 1, 0, 100, 200, 150, 250, 1)
+        ''')
         
         conn.commit()
         cursor.close()
         conn.close()
+        print("✅ BASE DE DATOS CONFIGURADA CORRECTAMENTE")
         
     except Exception as e:
-        print(f"❌ Error en setup: {e}")
+        print(f"❌ Error configurando BD: {e}")
 
-# Configurar base de datos al inicio
+# Configurar base de datos
 setup_database()
 
 HTML_DASHBOARD = '''
@@ -170,24 +169,18 @@ def obtener_estado():
         cursor.close()
         conn.close()
         
-        print(f"DEBUG - Estado crudo: {estado}")  # Esto nos dirá qué devuelve la BD
-        
         if estado:
-            # Asegurarnos de que tenemos suficientes columnas
-            if len(estado) >= 9:
-                return jsonify({
-                    "motores_activos": bool(estado[2]),
-                    "emergency_stop": bool(estado[3]), 
-                    "posicion_m1": estado[4],
-                    "posicion_m2": estado[5],
-                    "posicion_m3": estado[6],
-                    "posicion_m4": estado[7],
-                    "garra_abierta": bool(estado[8])
-                })
-            else:
-                return jsonify({"error": f"Estructura de tabla incorrecta. Columnas: {len(estado)}"})
+            return jsonify({
+                "motores_activos": bool(estado[2]),
+                "emergency_stop": bool(estado[3]), 
+                "posicion_m1": estado[4],
+                "posicion_m2": estado[5],
+                "posicion_m3": estado[6],
+                "posicion_m4": estado[7],
+                "garra_abierta": bool(estado[8])
+            })
         else:
-            return jsonify({"error": "No se encontró estado - la tabla está vacía"})
+            return jsonify({"error": "No se encontró estado"})
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)})
 
