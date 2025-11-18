@@ -1,4 +1,4 @@
-# config.py - Configuración de la base de datos
+# config.py - Configuración de la base de datoss
 import os
 
 def get_mysql_config():
