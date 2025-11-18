@@ -1,245 +1,313 @@
-import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from flask import Flask, render_template, request, jsonify
+import json
+import os
 
-class MotorControlApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Control de Posiciones de Motores")
-        self.root.geometry("600x700")
+app = Flask(__name__)
+
+# Archivo para guardar las posiciones
+POSITIONS_FILE = 'saved_positions.json'
+
+def load_positions():
+    try:
+        with open(POSITIONS_FILE, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
+
+def save_positions(positions):
+    with open(POSITIONS_FILE, 'w') as f:
+        json.dump(positions, f)
+
+@app.route('/')
+def index():
+    return '''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Control de Motores</title>
+        <style>
+            body { font-family: Arial; max-width: 600px; margin: 0 auto; padding: 20px; }
+            .motor { border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
+            button { padding: 10px; margin: 5px; }
+            .positions { border: 1px solid #ccc; padding: 10px; max-height: 200px; overflow-y: auto; }
+        </style>
+    </head>
+    <body>
+        <h1>Control de Posiciones de Motores</h1>
         
-        # Almacenar posiciones guardadas
-        self.saved_positions = []
-        
-        self.create_widgets()
-        
-    def create_widgets(self):
-        # Título
-        title_label = tk.Label(self.root, text="Posiciones (grados°)", font=("Arial", 14, "bold"))
-        title_label.pack(pady=10)
-        
-        # Frame principal para motores
-        main_frame = tk.Frame(self.root)
-        main_frame.pack(pady=10, fill="both", expand=True)
-        
-        # Crear controles para M1 a M4
-        self.motor_frames = []
-        for i in range(1, 5):
-            motor_frame = self.create_motor_control(main_frame, f"M{i}")
-            motor_frame.pack(pady=5, fill="x")
-            self.motor_frames.append(motor_frame)
-        
-        # Control para M5 (Garra)
-        garra_frame = tk.LabelFrame(main_frame, text="MS (Garra)", font=("Arial", 10, "bold"))
-        garra_frame.pack(pady=10, fill="x")
-        
-        self.garra_var = tk.StringVar(value="ABRIR")
-        tk.Radiobutton(garra_frame, text="ABRIR", variable=self.garra_var, value="ABRIR").pack(side="left", padx=10)
-        tk.Radiobutton(garra_frame, text="CERRAR", variable=self.garra_var, value="CERRAR").pack(side="left", padx=10)
-        
-        # Control de velocidad
-        speed_frame = tk.LabelFrame(main_frame, text="Velocidad (1-1000 RPM)", font=("Arial", 10, "bold"))
-        speed_frame.pack(pady=10, fill="x")
-        
-        self.speed_var = tk.StringVar(value="500")
-        speed_entry = tk.Entry(speed_frame, textvariable=self.speed_var, font=("Arial", 12), justify="center")
-        speed_entry.pack(pady=5, padx=10, fill="x")
-        
-        # Botones de control
-        button_frame = tk.Frame(main_frame)
-        button_frame.pack(pady=10, fill="x")
-        
-        tk.Button(button_frame, text="Guardar posición", command=self.save_position, 
-                  bg="lightblue", font=("Arial", 10)).pack(side="left", padx=5, fill="x", expand=True)
-        
-        tk.Button(button_frame, text="MOVER SECUENCIAL", command=self.move_sequential, 
-                  bg="lightgreen", font=("Arial", 10)).pack(side="left", padx=5, fill="x", expand=True)
-        
-        tk.Button(button_frame, text="Eliminar posición", command=self.delete_position, 
-                  bg="lightcoral", font=("Arial", 10)).pack(side="left", padx=5, fill="x", expand=True)
-        
-        # Lista de posiciones guardadas
-        positions_frame = tk.LabelFrame(main_frame, text="Posiciones Guardadas", font=("Arial", 10, "bold"))
-        positions_frame.pack(pady=10, fill="both", expand=True)
-        
-        # Listbox para mostrar posiciones guardadas
-        self.positions_listbox = tk.Listbox(positions_frame, font=("Arial", 10))
-        self.positions_listbox.pack(pady=5, padx=10, fill="both", expand=True)
-        
-        # Botón de inicio
-        tk.Button(main_frame, text="Inicio", command=self.home_position, 
-                  bg="yellow", font=("Arial", 12, "bold")).pack(pady=10, fill="x")
-    
-    def create_motor_control(self, parent, motor_name):
-        frame = tk.LabelFrame(parent, text=motor_name, font=("Arial", 10, "bold"))
-        
-        # Entrada de posición
-        position_frame = tk.Frame(frame)
-        position_frame.pack(fill="x", pady=5)
-        
-        tk.Label(position_frame, text="Posición (grados):", font=("Arial", 9)).pack(side="left", padx=5)
-        
-        position_var = tk.StringVar(value="0")
-        position_entry = tk.Entry(position_frame, textvariable=position_var, width=10, font=("Arial", 10))
-        position_entry.pack(side="left", padx=5)
-        
-        # Selector de dirección
-        direction_frame = tk.Frame(frame)
-        direction_frame.pack(fill="x", pady=5)
-        
-        direction_var = tk.StringVar(value="H")
-        tk.Radiobutton(direction_frame, text="H", variable=direction_var, value="H").pack(side="left", padx=10)
-        tk.Radiobutton(direction_frame, text="A", variable=direction_var, value="A").pack(side="left", padx=10)
-        
-        # Botón para mover motor individual
-        move_button = tk.Button(frame, text=f"Mover {motor_name}", 
-                                command=lambda: self.move_single_motor(motor_name, position_var.get(), direction_var.get()))
-        move_button.pack(pady=5, fill="x", padx=10)
-        
-        # Guardar referencias para acceso posterior
-        frame.position_var = position_var
-        frame.direction_var = direction_var
-        frame.motor_name = motor_name
-        
-        return frame
-    
-    def move_single_motor(self, motor_name, position, direction):
-        try:
-            pos = int(position)
-            if pos < 0 or pos > 360:
-                messagebox.showerror("Error", "La posición debe estar entre 0 y 360 grados")
-                return
-                
-            speed = self.speed_var.get()
-            # Aquí iría el código para enviar el comando al motor específico
-            print(f"Moviendo {motor_name} a {pos} grados, dirección {direction}, velocidad {speed} RPM")
+        <div id="motor-controls">
+            <!-- M1 -->
+            <div class="motor">
+                <h3>M1</h3>
+                <input type="number" id="m1-pos" value="0" min="0" max="360" placeholder="Grados">
+                <input type="radio" name="m1-dir" value="H" checked> H
+                <input type="radio" name="m1-dir" value="A"> A
+                <button onclick="moveMotor('M1')">Mover M1</button>
+            </div>
             
-            # Simulación de movimiento exitoso
-            messagebox.showinfo("Movimiento", f"{motor_name} moviéndose a {pos}°")
+            <!-- M2 -->
+            <div class="motor">
+                <h3>M2</h3>
+                <input type="number" id="m2-pos" value="0" min="0" max="360" placeholder="Grados">
+                <input type="radio" name="m2-dir" value="H" checked> H
+                <input type="radio" name="m2-dir" value="A"> A
+                <button onclick="moveMotor('M2')">Mover M2</button>
+            </div>
             
-        except ValueError:
-            messagebox.showerror("Error", "Por favor ingresa un valor numérico válido para la posición")
-    
-    def save_position(self):
-        # Obtener nombre para la posición
-        position_name = simpledialog.askstring("Guardar Posición", "Nombre de la posición:")
-        if not position_name:
-            return
+            <!-- M3 -->
+            <div class="motor">
+                <h3>M3</h3>
+                <input type="number" id="m3-pos" value="0" min="0" max="360" placeholder="Grados">
+                <input type="radio" name="m3-dir" value="H" checked> H
+                <input type="radio" name="m3-dir" value="A"> A
+                <button onclick="moveMotor('M3')">Mover M3</button>
+            </div>
             
-        # Recopilar datos de todos los motores
-        position_data = {
-            "name": position_name,
-            "motors": [],
-            "garra": self.garra_var.get(),
-            "speed": self.speed_var.get()
-        }
+            <!-- M4 -->
+            <div class="motor">
+                <h3>M4</h3>
+                <input type="number" id="m4-pos" value="0" min="0" max="360" placeholder="Grados">
+                <input type="radio" name="m4-dir" value="H" checked> H
+                <input type="radio" name="m4-dir" value="A"> A
+                <button onclick="moveMotor('M4')">Mover M4</button>
+            </div>
+        </div>
         
-        for frame in self.motor_frames:
-            motor_data = {
-                "name": frame.motor_name,
-                "position": frame.position_var.get(),
-                "direction": frame.direction_var.get()
+        <!-- Garra -->
+        <div class="motor">
+            <h3>MS (Garra)</h3>
+            <input type="radio" name="garra" value="ABRIR" checked> ABRIR
+            <input type="radio" name="garra" value="CERRAR"> CERRAR
+        </div>
+        
+        <!-- Velocidad -->
+        <div class="motor">
+            <h3>Velocidad (1-1000 RPM)</h3>
+            <input type="number" id="speed" value="500" min="1" max="1000">
+        </div>
+        
+        <!-- Botones -->
+        <div>
+            <button onclick="savePosition()" style="background: lightblue;">Guardar posición</button>
+            <button onclick="moveSequential()" style="background: lightgreen;">MOVER SECUENCIAL</button>
+            <button onclick="deletePosition()" style="background: lightcoral;">Eliminar posición</button>
+        </div>
+        
+        <!-- Posiciones guardadas -->
+        <div class="motor">
+            <h3>Posiciones Guardadas</h3>
+            <div id="positions-list" class="positions">
+                <!-- Las posiciones se cargan aquí -->
+            </div>
+        </div>
+        
+        <!-- Botón Inicio -->
+        <button onclick="homePosition()" style="background: yellow; width: 100%;">Inicio</button>
+        
+        <!-- Mensajes -->
+        <div id="message" style="margin-top: 20px;"></div>
+
+        <script>
+            let selectedPosition = null;
+            
+            // Cargar posiciones al iniciar
+            function loadPositions() {
+                fetch('/get_positions')
+                    .then(r => r.json())
+                    .then(positions => {
+                        const list = document.getElementById('positions-list');
+                        list.innerHTML = '';
+                        positions.forEach((pos, index) => {
+                            const div = document.createElement('div');
+                            div.innerHTML = `${pos.name} - Vel: ${pos.speed} RPM 
+                                <button onclick="selectPosition(${index})">Seleccionar</button>`;
+                            list.appendChild(div);
+                        });
+                    });
             }
-            position_data["motors"].append(motor_data)
-        
-        # Agregar a la lista de posiciones guardadas
-        self.saved_positions.append(position_data)
-        
-        # Actualizar la lista visual
-        self.update_positions_list()
-        
-        messagebox.showinfo("Éxito", f"Posición '{position_name}' guardada correctamente")
-        print(f"Posición '{position_name}' guardada")
-    
-    def update_positions_list(self):
-        self.positions_listbox.delete(0, tk.END)
-        for pos in self.saved_positions:
-            self.positions_listbox.insert(tk.END, f"{pos['name']} - Vel: {pos['speed']} RPM")
-    
-    def move_sequential(self):
-        if not self.saved_positions:
-            messagebox.showwarning("Advertencia", "No hay posiciones guardadas para mover")
-            return
             
-        # Obtener la posición seleccionada
-        selection = self.positions_listbox.curselection()
-        if not selection:
-            messagebox.showwarning("Advertencia", "Por favor selecciona una posición de la lista")
-            return
+            function selectPosition(index) {
+                selectedPosition = index;
+                document.getElementById('message').innerHTML = 
+                    `<p style="color: green;">Posición ${index} seleccionada</p>`;
+            }
             
-        selected_position = self.saved_positions[selection[0]]
-        
-        # Mover cada motor secuencialmente
-        print(f"Iniciando movimiento secuencial a posición: {selected_position['name']}")
-        
-        # Mostrar progreso
-        progress_window = tk.Toplevel(self.root)
-        progress_window.title("Movimiento en Progreso")
-        progress_window.geometry("300x150")
-        
-        progress_label = tk.Label(progress_window, text=f"Moviendo a posición: {selected_position['name']}")
-        progress_label.pack(pady=10)
-        
-        progress = ttk.Progressbar(progress_window, orient="horizontal", length=250, mode="determinate")
-        progress.pack(pady=10)
-        
-        # Simular movimiento secuencial
-        total_motors = len(selected_position["motors"]) + 1  # +1 para la garra
-        current_progress = 0
-        
-        for i, motor in enumerate(selected_position["motors"]):
-            current_progress = (i / total_motors) * 100
-            progress['value'] = current_progress
-            progress_window.update()
+            function moveMotor(motorName) {
+                const pos = document.getElementById(`${motorName.toLowerCase()}-pos`).value;
+                const dir = document.querySelector(`input[name="${motorName.toLowerCase()}-dir"]:checked`).value;
+                const speed = document.getElementById('speed').value;
+                
+                fetch('/move_single', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({motor_name: motorName, position: pos, direction: dir, speed: speed})
+                })
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('message').innerHTML = 
+                        `<p style="color: green;">${data.message}</p>`;
+                });
+            }
             
-            print(f"Moviendo {motor['name']} a {motor['position']} grados, dirección {motor['direction']}")
-            # Aquí iría el código real para mover cada motor
-        
-        # Mover garra
-        current_progress = ((total_motors - 1) / total_motors) * 100
-        progress['value'] = current_progress
-        progress_window.update()
-        
-        print(f"Configurando garra: {selected_position['garra']}")
-        print(f"Velocidad: {selected_position['speed']} RPM")
-        
-        # Completar progreso
-        progress['value'] = 100
-        progress_window.update()
-        
-        progress_label.config(text="Movimiento completado!")
-        self.root.after(1000, progress_window.destroy)  # Cerrar después de 1 segundo
-        
-        print("Movimiento secuencial completado")
-        messagebox.showinfo("Éxito", f"Movimiento a '{selected_position['name']}' completado")
-    
-    def delete_position(self):
-        selection = self.positions_listbox.curselection()
-        if not selection:
-            messagebox.showwarning("Advertencia", "Por favor selecciona una posición para eliminar")
-            return
+            function savePosition() {
+                const name = prompt('Nombre de la posición:');
+                if (!name) return;
+                
+                const motors = [];
+                for (let i = 1; i <= 4; i++) {
+                    motors.push({
+                        name: `M${i}`,
+                        position: document.getElementById(`m${i}-pos`).value,
+                        direction: document.querySelector(`input[name="m${i}-dir"]:checked`).value
+                    });
+                }
+                
+                const garra = document.querySelector('input[name="garra"]:checked').value;
+                const speed = document.getElementById('speed').value;
+                
+                fetch('/save_position', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name, motors, garra, speed})
+                })
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('message').innerHTML = 
+                        `<p style="color: green;">${data.message}</p>`;
+                    loadPositions();
+                });
+            }
             
-        position_name = self.saved_positions[selection[0]]["name"]
-        confirm = messagebox.askyesno("Confirmar", f"¿Estás seguro de que quieres eliminar la posición '{position_name}'?")
-        
-        if confirm:
-            del self.saved_positions[selection[0]]
-            self.update_positions_list()
-            messagebox.showinfo("Éxito", f"Posición '{position_name}' eliminada")
-            print(f"Posición '{position_name}' eliminada")
-    
-    def home_position(self):
-        # Regresar todos los motores a posición 0
-        for frame in self.motor_frames:
-            frame.position_var.set("0")
-            frame.direction_var.set("H")
-        
-        self.garra_var.set("ABRIR")
-        self.speed_var.set("500")
-        
-        print("Todos los motores en posición de inicio")
-        messagebox.showinfo("Inicio", "Todos los motores regresaron a posición de inicio")
+            function moveSequential() {
+                if (selectedPosition === null) {
+                    alert('Selecciona una posición primero');
+                    return;
+                }
+                
+                fetch('/move_sequential', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({index: selectedPosition})
+                })
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('message').innerHTML = 
+                        `<p style="color: green;">${data.message}</p>`;
+                });
+            }
+            
+            function deletePosition() {
+                if (selectedPosition === null) {
+                    alert('Selecciona una posición primero');
+                    return;
+                }
+                
+                if (confirm('¿Eliminar esta posición?')) {
+                    fetch('/delete_position', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({index: selectedPosition})
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        document.getElementById('message').innerHTML = 
+                            `<p style="color: green;">${data.message}</p>`;
+                        selectedPosition = null;
+                        loadPositions();
+                    });
+                }
+            }
+            
+            function homePosition() {
+                // Resetear valores
+                for (let i = 1; i <= 4; i++) {
+                    document.getElementById(`m${i}-pos`).value = 0;
+                    document.querySelector(`input[name="m${i}-dir"][value="H"]`).checked = true;
+                }
+                document.querySelector('input[name="garra"][value="ABRIR"]').checked = true;
+                document.getElementById('speed').value = 500;
+                document.getElementById('message').innerHTML = 
+                    '<p style="color: green;">Posición de inicio establecida</p>';
+            }
+            
+            // Cargar posiciones al iniciar
+            loadPositions();
+        </script>
+    </body>
+    </html>
+    '''
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = MotorControlApp(root)
-    root.mainloop()
+@app.route('/save_position', methods=['POST'])
+def save_position():
+    data = request.json
+    positions = load_positions()
+    
+    position_data = {
+        'name': data['name'],
+        'motors': data['motors'],
+        'garra': data['garra'],
+        'speed': data['speed']
+    }
+    
+    positions.append(position_data)
+    save_positions(positions)
+    
+    return jsonify({'success': True, 'message': f'Posición "{data["name"]}" guardada'})
+
+@app.route('/get_positions', methods=['GET'])
+def get_positions():
+    positions = load_positions()
+    return jsonify(positions)
+
+@app.route('/delete_position', methods=['POST'])
+def delete_position():
+    data = request.json
+    index = data['index']
+    
+    positions = load_positions()
+    if 0 <= index < len(positions):
+        deleted_name = positions[index]['name']
+        del positions[index]
+        save_positions(positions)
+        return jsonify({'success': True, 'message': f'Posición "{deleted_name}" eliminada'})
+    
+    return jsonify({'success': False, 'message': 'Error al eliminar'})
+
+@app.route('/move_sequential', methods=['POST'])
+def move_sequential():
+    data = request.json
+    position_index = data['index']
+    
+    positions = load_positions()
+    if 0 <= position_index < len(positions):
+        position = positions[position_index]
+        
+        # Simular movimiento
+        movements = []
+        for motor in position['motors']:
+            movements.append(f"{motor['name']} → {motor['position']}° ({motor['direction']})")
+        
+        return jsonify({
+            'success': True, 
+            'message': f'Movimiento completado: {position["name"]}',
+            'details': movements
+        })
+    
+    return jsonify({'success': False, 'message': 'Posición no encontrada'})
+
+@app.route('/move_single', methods=['POST'])
+def move_single():
+    data = request.json
+    motor_name = data['motor_name']
+    position = data['position']
+    direction = data['direction']
+    speed = data['speed']
+    
+    return jsonify({
+        'success': True,
+        'message': f'{motor_name} → {position}° ({direction}) a {speed} RPM'
+    })
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
