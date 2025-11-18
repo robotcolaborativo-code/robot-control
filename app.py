@@ -2,10 +2,11 @@ from flask import Flask, jsonify, render_template_string, request
 import mysql.connector
 import os
 import time
+import traceback
 
 app = Flask(__name__)
 
-# ======================= CONEXIÓN MYSQL CON VARIABLES DE ENTORNO =======================
+# ======================= CONEXIÓN MYSQL CON MANEJO DE ERRORES =======================
 def get_db_connection():
     try:
         conn = mysql.connector.connect(
@@ -13,32 +14,27 @@ def get_db_connection():
             user=os.environ.get('MYSQL_USER', 'root'),
             password=os.environ.get('MYSQL_PASSWORD', 'QttFmgSWJcoJfFKJNFwuscHPWPSESxWs'),
             database=os.environ.get('MYSQL_DATABASE', 'railway'),
-            port=int(os.environ.get('MYSQL_PORT', 57488))
+            port=int(os.environ.get('MYSQL_PORT', 57488)),
+            connect_timeout=10
         )
+        print("✅ Conexión MySQL exitosa")
         return conn
     except Exception as e:
         print(f"❌ Error conectando a MySQL: {e}")
+        print(f"🔍 Detalles: host={os.environ.get('MYSQL_HOST')}, user={os.environ.get('MYSQL_USER')}")
         return None
 
-# ======================= CONFIGURACIÓN INICIAL =======================
+# ======================= CONFIGURACIÓN INICIAL SIMPLIFICADA =======================
 def setup_database():
     try:
         conn = get_db_connection()
         if conn is None:
-            print("❌ No se pudo conectar a la base de datos")
-            return
+            print("❌ No se pudo conectar a la base de datos para setup")
+            return False
             
         cursor = conn.cursor()
         
-        # Verificar si las tablas ya existen
-        cursor.execute("SHOW TABLES LIKE 'comandos_robot'")
-        if cursor.fetchone():
-            print("✅ Tablas ya existen, saltando creación")
-            cursor.close()
-            conn.close()
-            return
-            
-        # Crear tablas si no existen
+        # Solo crear tablas si no existen
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS comandos_robot (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -90,49 +86,135 @@ def setup_database():
             )
         ''')
         
-        # Insertar estado inicial si no existe
-        cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'CDBOT_001'")
-        if not cursor.fetchone():
-            cursor.execute('''
-                INSERT INTO moduls_tellis 
-                (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta, velocidad_actual) 
-                VALUES 
-                ('CDBOT_001', 1, 0, 0, 0, 0, 0, 1, 500)
-            ''')
-        
-        # Insertar posiciones de ejemplo si no existen
-        cursor.execute("SELECT COUNT(*) FROM posiciones_guardadas")
-        if cursor.fetchone()[0] == 0:
-            posiciones_ejemplo = [
-                ('Inicio', 0, 0, 0, 0, 'ABRIR', 500),
-                ('Posición 1', 90, 45, 60, 30, 'CERRAR', 400),
-                ('Posición 2', 180, 90, 120, 60, 'ABRIR', 600),
-                ('Esquina', 270, 135, 180, 90, 'CERRAR', 300)
-            ]
-            
-            for pos in posiciones_ejemplo:
-                cursor.execute('''
-                    INSERT INTO posiciones_guardadas 
-                    (nombre, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_estado, velocidad) 
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ''', pos)
-        
         conn.commit()
         cursor.close()
         conn.close()
-        print("✅ BASE DE DATOS CONFIGURADA CORRECTAMENTE")
+        print("✅ Tablas creadas/verificadas correctamente")
+        return True
         
     except Exception as e:
-        print(f"❌ Error configurando BD: {e}")
+        print(f"❌ Error en setup_database: {e}")
+        print(traceback.format_exc())
+        return False
 
 # Configurar base de datos al inicio
 setup_database()
 
-# ======================= RUTAS PRINCIPALES =======================
+# ======================= HTML SIMPLIFICADO PARA PRUEBAS =======================
+HTML_SIMPLE = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Control Robot - Debug</title>
+    <style>
+        body { font-family: Arial; margin: 20px; }
+        .btn { padding: 10px; margin: 5px; background: blue; color: white; border: none; cursor: pointer; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Control Robot - Modo Debug</h1>
+    
+    <div id="status">Estado: Conectando...</div>
+    
+    <h3>Comandos Básicos</h3>
+    <button class="btn" onclick="sendCommand('ON')">ON</button>
+    <button class="btn" onclick="sendCommand('OFF')">OFF</button>
+    <button class="btn" onclick="sendCommand('ABRIR')">ABRIR GARRA</button>
+    <button class="btn" onclick="sendCommand('CERRAR')">CERRAR GARRA</button>
+    
+    <h3>Test Conexión</h3>
+    <button class="btn" onclick="testAPI()">Test API</button>
+    <button class="btn" onclick="testDB()">Test Base de Datos</button>
+    
+    <div id="result"></div>
+
+    <script>
+        async function sendCommand(cmd) {
+            try {
+                const response = await fetch('/api/comando/' + cmd);
+                const result = await response.json();
+                showResult(result, 'Comando: ' + cmd);
+            } catch (error) {
+                showResult({status: 'error', error: error.message}, 'Error');
+            }
+        }
+        
+        async function testAPI() {
+            try {
+                const response = await fetch('/api/test');
+                const result = await response.json();
+                showResult(result, 'Test API');
+            } catch (error) {
+                showResult({status: 'error', error: error.message}, 'Error API');
+            }
+        }
+        
+        async function testDB() {
+            try {
+                const response = await fetch('/api/test_db');
+                const result = await response.json();
+                showResult(result, 'Test DB');
+            } catch (error) {
+                showResult({status: 'error', error: error.message}, 'Error DB');
+            }
+        }
+        
+        function showResult(result, title) {
+            const div = document.getElementById('result');
+            const color = result.status === 'success' ? 'success' : 'error';
+            div.innerHTML = `<div class="${color}"><strong>${title}:</strong> ${JSON.stringify(result)}</div>`;
+        }
+        
+        // Test inicial
+        testAPI();
+    </script>
+</body>
+</html>
+'''
+
+# ======================= RUTAS CON MANEJO DE ERRORES =======================
 @app.route('/')
 def dashboard():
-    # Tu HTML_DASHBOARD completo aquí (lo mantienes igual)
-    return render_template_string(HTML_DASHBOARD)
+    return render_template_string(HTML_SIMPLE)
+
+@app.route('/api/test')
+def test_api():
+    """Ruta de prueba básica"""
+    try:
+        return jsonify({
+            "status": "success", 
+            "message": "✅ API funcionando correctamente",
+            "timestamp": time.time(),
+            "python_version": "Flask OK"
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/test_db')
+def test_db():
+    """Ruta para probar la base de datos"""
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return jsonify({"status": "error", "error": "No se pudo conectar a MySQL"}), 500
+            
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 as test")
+        result = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            "status": "success", 
+            "message": "✅ Base de datos conectada correctamente",
+            "db_test": result[0]
+        })
+    except Exception as e:
+        print(f"❌ Error en test_db: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/comando/<accion>')
 def enviar_comando(accion):
@@ -140,7 +222,7 @@ def enviar_comando(accion):
     try:
         conn = get_db_connection()
         if conn is None:
-            return jsonify({"status": "error", "error": "No database connection"})
+            return jsonify({"status": "error", "error": "No database connection"}), 500
             
         cursor = conn.cursor()
         
@@ -152,18 +234,19 @@ def enviar_comando(accion):
         cursor.close()
         conn.close()
         
-        return jsonify({"status": "success", "comando": accion})
+        return jsonify({"status": "success", "comando": accion, "message": "Comando guardado en BD"})
         
     except Exception as e:
-        return jsonify({"status": "error", "error": str(e)})
+        print(f"❌ Error en enviar_comando: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/comandos_pendientes/<esp32_id>')
 def obtener_comandos_pendientes(esp32_id):
-    """Obtener comandos pendientes para un ESP32 - RUTA CRÍTICA"""
+    """Obtener comandos pendientes para un ESP32"""
     try:
         conn = get_db_connection()
         if conn is None:
-            return jsonify({"status": "error", "error": "No database connection"})
+            return jsonify({"status": "error", "error": "No database connection"}), 500
             
         cursor = conn.cursor()
         
@@ -179,7 +262,6 @@ def obtener_comandos_pendientes(esp32_id):
             comando_data = {
                 "id": cmd[0],
                 "comando": cmd[2],
-                "parametros": cmd[3],
                 "motor_num": cmd[4],
                 "pasos": cmd[5],
                 "velocidad": cmd[6],
@@ -208,63 +290,50 @@ def obtener_comandos_pendientes(esp32_id):
         
     except Exception as e:
         print(f"❌ Error en comandos_pendientes: {e}")
-        return jsonify({"status": "error", "error": str(e)})
+        return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/actualizar_estado', methods=['POST'])
 def actualizar_estado():
-    """Actualizar estado del robot desde el ESP32 - RUTA CRÍTICA"""
+    """Actualizar estado del robot desde el ESP32"""
     try:
-        data = request.json
+        data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "error": "No JSON data received"}), 400
+            
         print(f"📊 Estado recibido del ESP32: {data}")
         
         conn = get_db_connection()
         if conn is None:
-            return jsonify({"status": "error", "error": "No database connection"})
+            return jsonify({"status": "error", "error": "No database connection"}), 500
             
         cursor = conn.cursor()
         
-        # Verificar si existe un registro para este ESP32
-        cursor.execute("SELECT id FROM moduls_tellis WHERE esp32_id = %s", (data.get('esp32_id', 'CDBOT_001'),))
-        existing = cursor.fetchone()
-        
-        if existing:
-            # Actualizar registro existente
-            cursor.execute(
-                """UPDATE moduls_tellis SET 
-                motores_activos = %s, emergency_stop = %s, 
-                posicion_m1 = %s, posicion_m2 = %s, posicion_m3 = %s, posicion_m4 = %s,
-                garra_abierta = %s, velocidad_actual = %s, timestamp = CURRENT_TIMESTAMP
-                WHERE esp32_id = %s""",
-                (
-                    data.get('motors_active', False),
-                    data.get('emergency_stop', False),
-                    data.get('motor1_deg', 0),
-                    data.get('motor2_deg', 0), 
-                    data.get('motor3_deg', 0),
-                    data.get('motor4_deg', 0),
-                    data.get('garra_state') == 'ABIERTA',
-                    data.get('velocidad_actual', 500),
-                    data.get('esp32_id', 'CDBOT_001')
-                )
-            )
-        else:
-            # Insertar nuevo registro
-            cursor.execute(
-                """INSERT INTO moduls_tellis 
-                (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta, velocidad_actual) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                (
-                    data.get('esp32_id', 'CDBOT_001'),
-                    data.get('motors_active', False),
-                    data.get('emergency_stop', False),
-                    data.get('motor1_deg', 0),
-                    data.get('motor2_deg', 0), 
-                    data.get('motor3_deg', 0),
-                    data.get('motor4_deg', 0),
-                    data.get('garra_state') == 'ABIERTA',
-                    data.get('velocidad_actual', 500)
-                )
-            )
+        # Usar INSERT ... ON DUPLICATE KEY UPDATE
+        cursor.execute('''
+            INSERT INTO moduls_tellis 
+            (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta, velocidad_actual) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+            motores_activos = VALUES(motores_activos),
+            emergency_stop = VALUES(emergency_stop),
+            posicion_m1 = VALUES(posicion_m1),
+            posicion_m2 = VALUES(posicion_m2),
+            posicion_m3 = VALUES(posicion_m3),
+            posicion_m4 = VALUES(posicion_m4),
+            garra_abierta = VALUES(garra_abierta),
+            velocidad_actual = VALUES(velocidad_actual),
+            timestamp = CURRENT_TIMESTAMP
+        ''', (
+            data.get('esp32_id', 'CDBOT_001'),
+            data.get('motors_active', False),
+            data.get('emergency_stop', False),
+            data.get('motor1_deg', 0),
+            data.get('motor2_deg', 0), 
+            data.get('motor3_deg', 0),
+            data.get('motor4_deg', 0),
+            data.get('garra_state') == 'ABIERTA',
+            data.get('velocidad_actual', 500)
+        ))
         
         conn.commit()
         cursor.close()
@@ -274,20 +343,20 @@ def actualizar_estado():
         
     except Exception as e:
         print(f"❌ Error actualizando estado: {e}")
-        return jsonify({"status": "error", "error": str(e)})
+        print(traceback.format_exc())
+        return jsonify({"status": "error", "error": str(e)}), 500
 
-# ... (mantén todas las demás rutas igual)
+# ======================= MANEJO DE ERRORES GLOBAL =======================
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({"status": "error", "error": "Endpoint no encontrado"}), 404
 
-@app.route('/api/test')
-def test_api():
-    """Ruta de prueba para verificar que la API funciona"""
-    return jsonify({
-        "status": "success", 
-        "message": "✅ API funcionando correctamente",
-        "timestamp": time.time()
-    })
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({"status": "error", "error": "Error interno del servidor"}), 500
 
 # ======================= INICIALIZACIÓN =======================
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
+    print(f"🚀 Iniciando servidor en puerto {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
