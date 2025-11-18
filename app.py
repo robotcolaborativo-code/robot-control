@@ -7,12 +7,66 @@ app = Flask(__name__)
 # Conexión CORRECTA con puerto 57488
 def get_db_connection():
     return mysql.connector.connect(
-        host='turntable.proxy.rlwy.net',  # Host de Railway
-        user='root',                       # Usuario
-        password='QttFmgSWJcoJfFKJNFwuscHPWPSESxWs',  # Contraseña
-        database='railway',                # Base de datos
-        port=57488                         # ⚠️ PUERTO CORRECTO
+        host='turntable.proxy.rlwy.net',
+        user='root',
+        password='QttFmgSWJcoJfFKJNFwuscHPWPSESxWs',
+        database='railway',
+        port=57488
     )
+
+# FUNCIÓN NUEVA: Crear tablas si no existen
+def crear_tablas_si_no_existen():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Crear tabla comandos_robot
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS comandos_robot (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                esp32_id VARCHAR(50),
+                comando VARCHAR(100),
+                parametros TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Crear tabla moduls_tellis
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS moduls_tellis (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                esp32_id VARCHAR(50),
+                motores_activos BOOLEAN,
+                emergency_stop BOOLEAN,
+                posicion_m1 INT,
+                posicion_m2 INT,
+                posicion_m3 INT,
+                posicion_m4 INT,
+                garra_abierta BOOLEAN
+            )
+        ''')
+        
+        # Insertar datos de ejemplo si la tabla está vacía
+        cursor.execute("SELECT COUNT(*) FROM moduls_tellis WHERE esp32_id = 'CDBOT_001'")
+        count = cursor.fetchone()[0]
+        
+        if count == 0:
+            cursor.execute('''
+                INSERT INTO moduls_tellis 
+                (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta) 
+                VALUES 
+                ('CDBOT_001', 1, 0, 100, 200, 150, 250, 1)
+            ''')
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("✅ Tablas verificadas/creadas correctamente")
+    except Exception as e:
+        print(f"❌ Error creando tablas: {e}")
+
+# Llamar la función al iniciar
+crear_tablas_si_no_existen()
 
 # HTML del dashboard
 HTML_DASHBOARD = '''
@@ -71,7 +125,7 @@ HTML_DASHBOARD = '''
                     document.getElementById('datos-estado').innerHTML = `
                         <p>🏃 Motores: ${estado.motores_activos ? 'ACTIVOS' : 'INACTIVOS'}</p>
                         <p>🛑 Emergencia: ${estado.emergency_stop ? 'ACTIVADA' : 'NORMAL'}</p>
-                        <p>📊 Posiciones: M1:${estado.posicion_m1} M2:${estado.posicion_m2}</p>
+                        <p>📊 Posiciones: M1:${estado.posicion_m1} M2:${estado.posicion_m2} M3:${estado.posicion_m3} M4:${estado.posicion_m4}</p>
                         <p>🤖 Garra: ${estado.garra_abierta ? 'ABIERTA' : 'CERRADA'}</p>
                     `;
                 }
