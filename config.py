@@ -1,11 +1,11 @@
-# config.py - Configuración de la base de datoss
+# config.py - Configuración de la base de datos
 import os
 
 def get_mysql_config():
     """Obtiene configuración MySQL desde variables de entorno de Railway"""
     
-    # Railway provee MYSQL_URL en formato: mysql://usuario:contraseña@host:puerto/base_datos
-    mysql_url = os.environ.get('MYSQL_URL')
+    # USAR DATABASE_URL en lugar de MYSQL_URL
+    mysql_url = os.environ.get('DATABASE_URL') or os.environ.get('MYSQL_URL')
     
     if mysql_url:
         # Extraer datos de la URL automáticamente
@@ -25,13 +25,14 @@ def get_mysql_config():
                 'database': database
             }
         except Exception as e:
-            print(f"❌ Error parseando MYSQL_URL: {e}")
+            print(f"❌ Error parseando DATABASE_URL: {e}")
+            print(f"URL recibida: {mysql_url}")
     
-    # Fallback: usar configuración manual
+    # Fallback: usar configuración manual (SOLO PARA PRUEBAS)
     return {
-        'host': 'TU_HOST_AQUI',  # <-- Railway lo provee automáticamente
+        'host': 'turntable.proxy.rlwy.net',
         'user': 'root',
         'password': 'QttFmgSWJcoJTFKJNFwuschPWPSESxWs',
-        'database': 'railway',
-        'port': 3306
+        'database': 'railway', 
+        'port': 57488
     }
