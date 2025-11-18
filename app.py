@@ -4,7 +4,6 @@ import os
 
 app = Flask(__name__)
 
-# Conexión QUE SÍ FUNCIONA
 def get_db_connection():
     return mysql.connector.connect(
         host='turntable.proxy.rlwy.net',
@@ -14,61 +13,61 @@ def get_db_connection():
         port=57488
     )
 
-# Crear tablas automáticamente
-def crear_tablas():
+def setup_database():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Tabla de comandos
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS comandos_robot (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                esp32_id VARCHAR(50),
-                comando VARCHAR(100),
-                parametros TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        # Verificar si las tablas existen
+        cursor.execute("SHOW TABLES LIKE 'comandos_robot'")
+        if not cursor.fetchone():
+            cursor.execute('''
+                CREATE TABLE comandos_robot (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    esp32_id VARCHAR(50),
+                    comando VARCHAR(100),
+                    parametros TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            print("✅ Tabla comandos_robot creada")
         
-        # Tabla de estado
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS moduls_tellis (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                esp32_id VARCHAR(50),
-                motores_activos BOOLEAN,
-                emergency_stop BOOLEAN,
-                posicion_m1 INT,
-                posicion_m2 INT,
-                posicion_m3 INT,
-                posicion_m4 INT,
-                garra_abierta BOOLEAN
-            )
-        ''')
-        
-        # Insertar datos de ejemplo
-        cursor.execute("SELECT COUNT(*) FROM moduls_tellis")
-        count = cursor.fetchone()[0]
-        
-        if count == 0:
+        cursor.execute("SHOW TABLES LIKE 'moduls_tellis'")
+        if not cursor.fetchone():
+            cursor.execute('''
+                CREATE TABLE moduls_tellis (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    esp32_id VARCHAR(50),
+                    motores_activos BOOLEAN,
+                    emergency_stop BOOLEAN,
+                    posicion_m1 INT,
+                    posicion_m2 INT,
+                    posicion_m3 INT,
+                    posicion_m4 INT,
+                    garra_abierta BOOLEAN
+                )
+            ''')
+            print("✅ Tabla moduls_tellis creada")
+            
+            # Insertar datos iniciales
             cursor.execute('''
                 INSERT INTO moduls_tellis 
                 (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta) 
                 VALUES 
                 ('CDBOT_001', 1, 0, 100, 200, 150, 250, 1)
             ''')
+            print("✅ Datos de ejemplo insertados")
         
         conn.commit()
         cursor.close()
         conn.close()
-        print("✅ Tablas listas")
+        
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ Error en setup: {e}")
 
-# Llamar al iniciar
-crear_tablas()
+# Configurar base de datos al inicio
+setup_database()
 
-# HTML del dashboard
 HTML_DASHBOARD = '''
 <!DOCTYPE html>
 <html>
@@ -76,15 +75,12 @@ HTML_DASHBOARD = '''
     <title>Dashboard Robot</title>
     <style>
         body { font-family: Arial; margin: 40px; background: #f5f5f5; }
-        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .btn { padding: 15px 25px; margin: 10px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; transition: all 0.3s; }
-        .btn:hover { background: #0056b3; transform: translateY(-2px); }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+        .btn { padding: 15px 25px; margin: 5px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+        .btn:hover { background: #0056b3; }
         .emergency { background: #dc3545; }
         .emergency:hover { background: #c82333; }
-        .status { padding: 20px; background: #f8f9fa; margin: 20px 0; border-radius: 5px; border-left: 4px solid #007bff; }
-        h1 { color: #333; text-align: center; margin-bottom: 30px; }
-        .controls { text-align: center; margin: 30px 0; }
-        .status-item { margin: 10px 0; padding: 10px; background: white; border-radius: 4px; }
+        .status { padding: 20px; background: #f8f9fa; margin: 20px 0; border-radius: 5px; }
     </style>
 </head>
 <body>
@@ -96,17 +92,13 @@ HTML_DASHBOARD = '''
             <div id="datos-estado">Cargando...</div>
         </div>
 
-        <div class="controls">
-            <h3>🎮 Comandos de Movimiento:</h3>
-            <button class="btn" onclick="enviarComando('forward')">⬆ Adelante</button>
-            <button class="btn" onclick="enviarComando('backward')">⬇ Atrás</button>
-            <br>
-            <button class="btn" onclick="enviarComando('left')">⬅ Izquierda</button>
-            <button class="btn" onclick="enviarComando('right')">➡ Derecha</button>
-            <br>
-            <button class="btn" onclick="enviarComando('stop')">⏹ Detener</button>
-            <button class="btn emergency" onclick="enviarComando('emergency_stop')">🛑 PARADA EMERGENCIA</button>
-        </div>
+        <h3>🎮 Comandos:</h3>
+        <button class="btn" onclick="enviarComando('forward')">⬆ Adelante</button>
+        <button class="btn" onclick="enviarComando('backward')">⬇ Atrás</button>
+        <button class="btn" onclick="enviarComando('left')">⬅ Izquierda</button>
+        <button class="btn" onclick="enviarComando('right')">➡ Derecha</button>
+        <button class="btn" onclick="enviarComando('stop')">⏹ Detener</button>
+        <button class="btn emergency" onclick="enviarComando('emergency_stop')">🛑 Emergencia</button>
     </div>
 
     <script>
@@ -114,43 +106,33 @@ HTML_DASHBOARD = '''
             try {
                 const response = await fetch(`/api/comando/${accion}`);
                 const result = await response.json();
-                if (result.status === 'success') {
-                    alert(`✅ Comando ${accion} enviado correctamente`);
-                } else {
-                    alert(`❌ Error: ${result.error}`);
-                }
+                alert(result.status === 'success' ? `✅ ${accion} enviado` : `❌ Error: ${result.error}`);
                 actualizarEstado();
             } catch (error) {
-                alert('❌ Error de conexión con el servidor');
+                alert('❌ Error de conexión');
             }
         }
 
         async function actualizarEstado() {
             try {
                 const response = await fetch('/api/estado');
-                const data = await response.json();
+                const estado = await response.json();
                 
-                if (data.error) {
-                    document.getElementById('datos-estado').innerHTML = 
-                        `<div class="status-item">❌ ${data.error}</div>`;
+                if (estado.error) {
+                    document.getElementById('datos-estado').innerHTML = `❌ ${estado.error}`;
                 } else {
                     document.getElementById('datos-estado').innerHTML = `
-                        <div class="status-item">🏃 Motores: <strong>${data.motores_activos ? 'ACTIVOS' : 'INACTIVOS'}</strong></div>
-                        <div class="status-item">🛑 Emergencia: <strong>${data.emergency_stop ? 'ACTIVADA' : 'NORMAL'}</strong></div>
-                        <div class="status-item">📊 Posición M1: <strong>${data.posicion_m1}</strong></div>
-                        <div class="status-item">📊 Posición M2: <strong>${data.posicion_m2}</strong></div>
-                        <div class="status-item">📊 Posición M3: <strong>${data.posicion_m3}</strong></div>
-                        <div class="status-item">📊 Posición M4: <strong>${data.posicion_m4}</strong></div>
-                        <div class="status-item">🤖 Garra: <strong>${data.garra_abierta ? 'ABIERTA' : 'CERRADA'}</strong></div>
+                        <p>🏃 Motores: ${estado.motores_activos ? 'ACTIVOS' : 'INACTIVOS'}</p>
+                        <p>🛑 Emergencia: ${estado.emergency_stop ? 'ACTIVADA' : 'NORMAL'}</p>
+                        <p>📊 Posiciones: M1:${estado.posicion_m1} M2:${estado.posicion_m2}</p>
+                        <p>🤖 Garra: ${estado.garra_abierta ? 'ABIERTA' : 'CERRADA'}</p>
                     `;
                 }
             } catch (error) {
-                document.getElementById('datos-estado').innerHTML = 
-                    '<div class="status-item">❌ Error cargando estado del robot</div>';
+                document.getElementById('datos-estado').innerHTML = '❌ Error cargando estado';
             }
         }
 
-        // Actualizar cada 3 segundos
         setInterval(actualizarEstado, 3000);
         actualizarEstado();
     </script>
@@ -188,18 +170,24 @@ def obtener_estado():
         cursor.close()
         conn.close()
         
+        print(f"DEBUG - Estado crudo: {estado}")  # Esto nos dirá qué devuelve la BD
+        
         if estado:
-            return jsonify({
-                "motores_activos": bool(estado[2]),
-                "emergency_stop": bool(estado[3]), 
-                "posicion_m1": estado[4],
-                "posicion_m2": estado[5],
-                "posicion_m3": estado[6],
-                "posicion_m4": estado[7],
-                "garra_abierta": bool(estado[8])
-            })
+            # Asegurarnos de que tenemos suficientes columnas
+            if len(estado) >= 9:
+                return jsonify({
+                    "motores_activos": bool(estado[2]),
+                    "emergency_stop": bool(estado[3]), 
+                    "posicion_m1": estado[4],
+                    "posicion_m2": estado[5],
+                    "posicion_m3": estado[6],
+                    "posicion_m4": estado[7],
+                    "garra_abierta": bool(estado[8])
+                })
+            else:
+                return jsonify({"error": f"Estructura de tabla incorrecta. Columnas: {len(estado)}"})
         else:
-            return jsonify({"error": "No se encontró estado del robot"})
+            return jsonify({"error": "No se encontró estado - la tabla está vacía"})
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)})
 
