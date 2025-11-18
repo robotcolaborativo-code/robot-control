@@ -25,6 +25,7 @@ def setup_database():
         # Eliminar y recrear tablas para empezar fresco
         cursor.execute("DROP TABLE IF EXISTS comandos_robot")
         cursor.execute("DROP TABLE IF EXISTS moduls_tellis")
+        cursor.execute("DROP TABLE IF EXISTS posiciones_guardadas")
         
         # Tabla de comandos EXPANDIDA
         cursor.execute('''
@@ -42,6 +43,7 @@ def setup_database():
                 posicion_m3 FLOAT,
                 posicion_m4 FLOAT,
                 garra_estado VARCHAR(10),
+                modo_conexion VARCHAR(20),
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -63,6 +65,21 @@ def setup_database():
             )
         ''')
         
+        # Tabla de posiciones guardadas
+        cursor.execute('''
+            CREATE TABLE posiciones_guardadas (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                nombre VARCHAR(100),
+                posicion_m1 FLOAT,
+                posicion_m2 FLOAT,
+                posicion_m3 FLOAT,
+                posicion_m4 FLOAT,
+                garra_estado VARCHAR(10),
+                velocidad INT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         # Insertar estado inicial
         cursor.execute('''
             INSERT INTO moduls_tellis 
@@ -70,6 +87,21 @@ def setup_database():
             VALUES 
             ('CDBOT_001', 1, 0, 0, 0, 0, 0, 1, 500)
         ''')
+        
+        # Insertar algunas posiciones de ejemplo
+        posiciones_ejemplo = [
+            ('Inicio', 0, 0, 0, 0, 'ABRIR', 500),
+            ('Posición 1', 90, 45, 60, 30, 'CERRAR', 400),
+            ('Posición 2', 180, 90, 120, 60, 'ABRIR', 600),
+            ('Esquina', 270, 135, 180, 90, 'CERRAR', 300)
+        ]
+        
+        for pos in posiciones_ejemplo:
+            cursor.execute('''
+                INSERT INTO posiciones_guardadas 
+                (nombre, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_estado, velocidad) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ''', pos)
         
         conn.commit()
         cursor.close()
@@ -82,7 +114,7 @@ def setup_database():
 # Configurar base de datos al inicio
 setup_database()
 
-# ======================= HTML DASHBOARD COMPLETO =======================
+# ======================= HTML DASHBOARD COMPLETO ACTUALIZADO =======================
 HTML_DASHBOARD = '''
 <!DOCTYPE html>
 <html>
@@ -360,6 +392,73 @@ HTML_DASHBOARD = '''
             animation: pulse 2s infinite;
         }
 
+        .conexion-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-connected {
+            background: #00C851;
+            box-shadow: 0 0 10px #00C851;
+        }
+
+        .status-disconnected {
+            background: #ff4444;
+            box-shadow: 0 0 10px #ff4444;
+        }
+
+        .status-connecting {
+            background: #ffbb33;
+            box-shadow: 0 0 10px #ffbb33;
+            animation: pulse 1s infinite;
+        }
+
+        .posiciones-container {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 15px;
+        }
+
+        .posicion-item {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .posicion-item:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .posicion-info {
+            flex-grow: 1;
+        }
+
+        .posicion-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .btn-small {
+            padding: 5px 10px;
+            font-size: 0.8em;
+        }
+
         @keyframes pulse {
             0% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -380,6 +479,11 @@ HTML_DASHBOARD = '''
             <!-- PANEL IZQUIERDO: ESTADO Y CONTROL BÁSICO -->
             <div class="panel">
                 <h2>📊 Estado del Robot</h2>
+                
+                <div class="conexion-status">
+                    <div class="status-indicator status-connected" id="status-indicator"></div>
+                    <span id="conexion-text">Conectado vía Serial</span>
+                </div>
                 
                 <div class="status-grid" id="estado-container">
                     <div class="status-item">
@@ -416,6 +520,14 @@ HTML_DASHBOARD = '''
                     <div class="status-item">
                         <div class="label">📍 M4 Posición</div>
                         <div class="value" id="posicion-m4">0°</div>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <h3>🔌 Configuración de Conexión</h3>
+                    <div class="btn-grid">
+                        <button class="btn" onclick="cambiarModoConexion('SERIAL')">🔌 MODO SERIAL</button>
+                        <button class="btn" onclick="cambiarModoConexion('WIFI')">📡 MODO Wi-Fi</button>
                     </div>
                 </div>
 
@@ -525,9 +637,16 @@ HTML_DASHBOARD = '''
 
                 <div class="control-group">
                     <h3>💾 Posiciones Guardadas</h3>
+                    
                     <div class="btn-grid">
                         <button class="btn" onclick="guardarPosicion()">💾 GUARDAR POSICIÓN</button>
-                        <button class="btn btn-warning" onclick="cargarPosicionInicio()">📥 CARGAR INICIO</button>
+                        <button class="btn btn-warning" onclick="cargarPosicionActual()">📥 CARGAR ACTUAL</button>
+                    </div>
+
+                    <div class="posiciones-container">
+                        <div id="lista-posiciones">
+                            <!-- Las posiciones se cargarán aquí -->
+                        </div>
                     </div>
                 </div>
             </div>
@@ -535,6 +654,10 @@ HTML_DASHBOARD = '''
     </div>
 
     <script>
+        // ======================= VARIABLES GLOBALES =======================
+        let modoConexionActual = 'SERIAL';
+        let posicionesGuardadas = [];
+
         // ======================= FUNCIONES PRINCIPALES =======================
         
         function showAlert(message, type = 'success') {
@@ -547,6 +670,53 @@ HTML_DASHBOARD = '''
             setTimeout(() => {
                 alert.remove();
             }, 5000);
+        }
+
+        function actualizarIndicadorConexion(modo, estado) {
+            const indicator = document.getElementById('status-indicator');
+            const text = document.getElementById('conexion-text');
+            
+            if (estado === 'conectado') {
+                indicator.className = 'status-indicator status-connected';
+                text.textContent = `Conectado vía ${modo}`;
+            } else if (estado === 'conectando') {
+                indicator.className = 'status-indicator status-connecting';
+                text.textContent = `Conectando vía ${modo}...`;
+            } else {
+                indicator.className = 'status-indicator status-disconnected';
+                text.textContent = 'Desconectado';
+            }
+        }
+
+        // Cambiar modo de conexión
+        async function cambiarModoConexion(modo) {
+            actualizarIndicadorConexion(modo, 'conectando');
+            
+            try {
+                const response = await fetch('/api/cambiar_conexion', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        modo: modo
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    modoConexionActual = modo;
+                    actualizarIndicadorConexion(modo, 'conectado');
+                    showAlert(`✅ Modo cambiado a ${modo}`);
+                } else {
+                    actualizarIndicadorConexion(modoConexionActual, 'conectado');
+                    showAlert(`❌ Error: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                actualizarIndicadorConexion(modoConexionActual, 'conectado');
+                showAlert('❌ Error de conexión', 'error');
+            }
         }
 
         // Actualizar estado del robot
@@ -583,6 +753,104 @@ HTML_DASHBOARD = '''
 
             } catch (error) {
                 console.error('Error actualizando estado:', error);
+            }
+        }
+
+        // Cargar posiciones guardadas
+        async function cargarPosiciones() {
+            try {
+                const response = await fetch('/api/posiciones');
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    posicionesGuardadas = result.posiciones;
+                    actualizarListaPosiciones();
+                }
+            } catch (error) {
+                console.error('Error cargando posiciones:', error);
+            }
+        }
+
+        // Actualizar lista de posiciones en la interfaz
+        function actualizarListaPosiciones() {
+            const lista = document.getElementById('lista-posiciones');
+            lista.innerHTML = '';
+
+            if (posicionesGuardadas.length === 0) {
+                lista.innerHTML = '<div style="text-align: center; opacity: 0.7;">No hay posiciones guardadas</div>';
+                return;
+            }
+
+            posicionesGuardadas.forEach((pos, index) => {
+                const item = document.createElement('div');
+                item.className = 'posicion-item';
+                item.innerHTML = `
+                    <div class="posicion-info">
+                        <strong>${pos.nombre}</strong><br>
+                        <small>M1:${pos.posicion_m1}° M2:${pos.posicion_m2}° M3:${pos.posicion_m3}° M4:${pos.posicion_m4}°</small>
+                    </div>
+                    <div class="posicion-actions">
+                        <button class="btn btn-small" onclick="cargarPosicion(${pos.id})">📥</button>
+                        <button class="btn btn-small btn-warning" onclick="eliminarPosicion(${pos.id})">🗑️</button>
+                    </div>
+                `;
+                lista.appendChild(item);
+            });
+        }
+
+        // Cargar posición actual en los campos
+        function cargarPosicionActual() {
+            // Esta función cargaría la posición actual del robot en los campos
+            // Por ahora, ponemos valores por defecto
+            showAlert('📥 Valores actuales cargados en los campos');
+        }
+
+        // Cargar posición específica
+        async function cargarPosicion(id) {
+            try {
+                const response = await fetch(`/api/cargar_posicion/${id}`);
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    const pos = result.posicion;
+                    
+                    // Cargar valores en los campos
+                    document.getElementById('pos-m1').value = pos.posicion_m1;
+                    document.getElementById('pos-m2').value = pos.posicion_m2;
+                    document.getElementById('pos-m3').value = pos.posicion_m3;
+                    document.getElementById('pos-m4').value = pos.posicion_m4;
+                    document.getElementById('velocidad-pos').value = pos.velocidad;
+                    
+                    showAlert(`✅ Posición "${pos.nombre}" cargada`);
+                } else {
+                    showAlert(`❌ Error: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                showAlert('❌ Error de conexión', 'error');
+            }
+        }
+
+        // Eliminar posición
+        async function eliminarPosicion(id) {
+            if (!confirm('¿Estás seguro de que quieres eliminar esta posición?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/eliminar_posicion/${id}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    showAlert('✅ Posición eliminada');
+                    cargarPosiciones(); // Recargar la lista
+                } else {
+                    showAlert(`❌ Error: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                showAlert('❌ Error de conexión', 'error');
             }
         }
 
@@ -695,6 +963,15 @@ HTML_DASHBOARD = '''
             const nombre = prompt('Nombre para la posición:');
             if (!nombre) return;
 
+            const posiciones = [
+                parseFloat(document.getElementById('pos-m1').value),
+                parseFloat(document.getElementById('pos-m2').value),
+                parseFloat(document.getElementById('pos-m3').value),
+                parseFloat(document.getElementById('pos-m4').value)
+            ];
+
+            const velocidad = parseInt(document.getElementById('velocidad-pos').value);
+
             try {
                 const response = await fetch('/api/guardar_posicion', {
                     method: 'POST',
@@ -702,7 +979,9 @@ HTML_DASHBOARD = '''
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        nombre: nombre
+                        nombre: nombre,
+                        posiciones: posiciones,
+                        velocidad: velocidad
                     })
                 });
 
@@ -710,6 +989,7 @@ HTML_DASHBOARD = '''
                 
                 if (result.status === 'success') {
                     showAlert(`✅ Posición "${nombre}" guardada`);
+                    cargarPosiciones(); // Recargar la lista
                 } else {
                     showAlert(`❌ Error: ${result.error}`, 'error');
                 }
@@ -718,20 +998,20 @@ HTML_DASHBOARD = '''
             }
         }
 
-        // Cargar posición de inicio
-        function cargarPosicionInicio() {
-            document.getElementById('pos-m1').value = 0;
-            document.getElementById('pos-m2').value = 0;
-            document.getElementById('pos-m3').value = 0;
-            document.getElementById('pos-m4').value = 0;
-            showAlert('📥 Posición de inicio cargada');
-        }
-
+        // ======================= INICIALIZACIÓN =======================
+        
         // Actualizar estado cada 3 segundos
         setInterval(actualizarEstado, 3000);
         
+        // Cargar posiciones al iniciar
+        setInterval(cargarPosiciones, 5000);
+        
         // Actualizar al cargar la página
-        document.addEventListener('DOMContentLoaded', actualizarEstado);
+        document.addEventListener('DOMContentLoaded', function() {
+            actualizarEstado();
+            cargarPosiciones();
+            actualizarIndicadorConexion('SERIAL', 'conectado');
+        });
     </script>
 </body>
 </html>
@@ -758,6 +1038,29 @@ def enviar_comando(accion):
         conn.close()
         
         return jsonify({"status": "success", "comando": accion})
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)})
+
+@app.route('/api/cambiar_conexion', methods=['POST'])
+def cambiar_conexion():
+    """Cambiar entre modo Serial y Wi-Fi"""
+    try:
+        data = request.json
+        modo = data.get('modo')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            "INSERT INTO comandos_robot (esp32_id, comando, modo_conexion) VALUES (%s, %s, %s)",
+            ('CDBOT_001', f'MODE:{modo}', modo)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({"status": "success", "mensaje": f"Modo cambiado a {modo}"})
         
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)})
@@ -822,25 +1125,105 @@ def mover_posicion():
 
 @app.route('/api/guardar_posicion', methods=['POST'])
 def guardar_posicion():
-    """Guardar posición actual"""
+    """Guardar posición en la base de datos"""
     try:
         data = request.json
         nombre = data.get('nombre')
+        posiciones = data.get('posiciones', [])
+        velocidad = data.get('velocidad', 500)
         
-        # En una implementación real, aquí guardarías en una tabla de posiciones
-        # Por ahora solo registramos el comando
         conn = get_db_connection()
         cursor = conn.cursor()
         
         cursor.execute(
-            "INSERT INTO comandos_robot (esp32_id, comando, parametros) VALUES (%s, %s, %s)",
-            ('CDBOT_001', 'GUARDAR_POSICION', nombre)
+            """INSERT INTO posiciones_guardadas 
+            (nombre, posicion_m1, posicion_m2, posicion_m3, posicion_m4, velocidad) 
+            VALUES (%s, %s, %s, %s, %s, %s)""",
+            (nombre, posiciones[0], posiciones[1], posiciones[2], posiciones[3], velocidad)
         )
         conn.commit()
         cursor.close()
         conn.close()
         
         return jsonify({"status": "success", "mensaje": f"Posición '{nombre}' guardada"})
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)})
+
+@app.route('/api/posiciones')
+def obtener_posiciones():
+    """Obtener lista de posiciones guardadas"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM posiciones_guardadas ORDER BY nombre")
+        posiciones = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        posiciones_list = []
+        for pos in posiciones:
+            posiciones_list.append({
+                "id": pos[0],
+                "nombre": pos[1],
+                "posicion_m1": float(pos[2]),
+                "posicion_m2": float(pos[3]),
+                "posicion_m3": float(pos[4]),
+                "posicion_m4": float(pos[5]),
+                "velocidad": int(pos[7])
+            })
+        
+        return jsonify({"status": "success", "posiciones": posiciones_list})
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)})
+
+@app.route('/api/cargar_posicion/<int:posicion_id>')
+def cargar_posicion(posicion_id):
+    """Cargar una posición específica"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM posiciones_guardadas WHERE id = %s", (posicion_id,))
+        posicion = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if posicion:
+            posicion_data = {
+                "id": posicion[0],
+                "nombre": posicion[1],
+                "posicion_m1": float(posicion[2]),
+                "posicion_m2": float(posicion[3]),
+                "posicion_m3": float(posicion[4]),
+                "posicion_m4": float(posicion[5]),
+                "velocidad": int(posicion[7])
+            }
+            return jsonify({"status": "success", "posicion": posicion_data})
+        else:
+            return jsonify({"status": "error", "error": "Posición no encontrada"})
+            
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)})
+
+@app.route('/api/eliminar_posicion/<int:posicion_id>', methods=['DELETE'])
+def eliminar_posicion(posicion_id):
+    """Eliminar una posición guardada"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("DELETE FROM posiciones_guardadas WHERE id = %s", (posicion_id,))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({"status": "success", "mensaje": "Posición eliminada"})
         
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)})
