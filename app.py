@@ -27,10 +27,12 @@ def setup_database():
     try:
         conn = get_db_connection()
         if conn is None:
+            print("❌ No se pudo conectar a la base de datos")
             return False
             
         cursor = conn.cursor()
         
+        # Crear tablas si no existen
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS comandos_robot (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -102,6 +104,7 @@ def setup_database():
         print(f"❌ Error configurando BD: {e}")
         return False
 
+# Configurar base de datos al inicio
 setup_database()
 
 # ======================= HTML DASHBOARD COMPLETO =======================
@@ -899,6 +902,7 @@ def obtener_comandos_pendientes(esp32_id):
             
         cursor = conn.cursor()
         
+        # Obtener comandos no ejecutados
         cursor.execute(
             "SELECT * FROM comandos_robot WHERE esp32_id = %s AND (ejecutado IS NULL OR ejecutado = FALSE) ORDER BY timestamp ASC LIMIT 10",
             (esp32_id,)
@@ -921,6 +925,7 @@ def obtener_comandos_pendientes(esp32_id):
             }
             comandos_list.append(comando_data)
         
+        # Marcar como ejecutados
         if comandos:
             ids = [str(cmd[0]) for cmd in comandos]
             placeholders = ','.join(['%s'] * len(ids))
