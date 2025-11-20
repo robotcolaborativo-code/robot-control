@@ -1,0 +1,603 @@
+#include <WiFi.h>
+#include <ESP32Servo.h>
+#include <vector>
+#include <HTTPClient.h>
+
+// ======================= CONFIG =======================
+const char* ssid = "d24cc2";
+const char* password = "228059445";
+const uint16_t TCP_PORT_DEFAULT = 8080;
+
+// CONEXIÓN AUTOMÁTICA ACTIVADA
+const bool AUTO_WIFI = true;
+
+// Configuración para dashboard en la nube
+const char* CLOUD_API_URL = "https://tu-api.onrender.com";
+const String ESP32_ID = "cobot_01";
+
+// ======================= HARDWARE =======================
+const int WIFI_LED = 2;
+const int STATUS_LED = 4;
+
+int stepPins[4] = {12, 26, 33, 18};
+int dirPins[4]  = {14, 25, 32, 19};
+
+Servo garra;
+int pinServo = 23;
+int posAbierta = 0;
+int posCerrada = 180;
+
+// ======================= ESTADO =======================
+WiFiServer server(TCP_PORT_DEFAULT);
+WiFiClient clientTCP;
+bool wifi_server_running = false;
+bool wifi_connecting = false;
+
+// Estado de conexión mejorado
+enum WiFiStatus {
+  WIFI_DISCONNECTED,
+  WIFI_CONNECTING, 
+  WIFI_CONNECTED,
+  WIFI_CLOUD_READY
+};
+WiFiStatus wifi_status = WIFI_DISCONNECTED;
+
+String inputString = "";
+bool motoresActivos = false;
+bool emergencyStop = false;
+float current_deg[5] = {0,0,0,0,0};
+
+// TIMING OPTIMIZADO - MÁS RÁPIDO
+bool ledState = LOW;
+unsigned long ledLastToggle = 0;
+const unsigned long LED_BLINK_MS = 300; // REDUCIDO
+unsigned long lastWifiCheck = 0;
+const unsigned long WIFI_CHECK_INTERVAL = 20000; // 20s en vez de 10s
+unsigned long lastCloudUpdate = 0;
+const unsigned long CLOUD_UPDATE_INTERVAL = 25000; // 25s en vez de 15s
+unsigned long lastCommandTime = 0;
+bool commandInProgress = false;
+
+// Prototipos
+void procesarComando(String cmd);
+void start_wifi_server(uint16_t port = TCP_PORT_DEFAULT);
+void stop_wifi_server();
+void mantener_wifi();
+void update_wifi_led();
+void moverMotorPasos(int motor, long pasos, bool sentidoHorario, int velocidad);
+long grados_a_pasos(float grados);
+void moverMotorPorDeltaDeg(int motor, float delta_deg, int velocidad);
+void moverMotorSecuencialDesdePos(float target_deg[5], int velocidad);
+
+// NUEVOS PROTOTIPOS OPTIMIZADOS
+void enviarEstadoALaNube();
+void verificarConexionWiFi();
+void actualizarEstadoWiFi();
+String generarJSONEstado();
+void procesarComandosRapido();
+void procesarComandoRapido(String cmd);
+
+// ======================= SETUP =======================
+void setup() {
+  Serial.begin(115200);
+  Serial.setTimeout(10); // OPTIMIZACIÓN: Reducido de 1000ms a 10ms!
+  delay(200);
+  Serial.println("\n🔧 Iniciando ESP32 Cobot...");
+  Serial.println("🤖 ESP32 listo...");
+
+  pinMode(WIFI_LED, OUTPUT);
+  pinMode(STATUS_LED, OUTPUT);
+  digitalWrite(WIFI_LED, LOW);
+  digitalWrite(STATUS_LED, LOW);
+  ledState = LOW;
+
+  for (int i = 0; i < 4; ++i) {
+    pinMode(stepPins[i], OUTPUT);
+    pinMode(dirPins[i], OUTPUT);
+    digitalWrite(stepPins[i], LOW);
+    digitalWrite(dirPins[i], LOW);
+  }
+
+  garra.attach(pinServo);
+  garra.write(posAbierta);
+  current_deg[4] = posAbierta;
+
+  motoresActivos = false;
+  emergencyStop = false;
+
+  // CONEXIÓN AUTOMÁTICA ACTIVADA
+  if (AUTO_WIFI) {
+    Serial.println("📡 Iniciando conexión WiFi automática...");
+    start_wifi_server(TCP_PORT_DEFAULT);
+  }
+}
+
+// ======================= LOOP OPTIMIZADO =======================
+void loop() {
+  // OPTIMIZACIÓN: Procesar comandos PRIMERO y más rápido
+  procesarComandosRapido();
+  
+  mantener_wifi();
+  verificarConexionWiFi();
+  update_wifi_led();
+
+  // Envío de datos a la nube (solo si no hay comandos en progreso)
+  if (!commandInProgress && wifi_status == WIFI_CONNECTED && millis() - lastCloudUpdate > CLOUD_UPDATE_INTERVAL) {
+    enviarEstadoALaNube();
+    lastCloudUpdate = millis();
+  }
+
+  // OPTIMIZACIÓN: Delay reducido
+  delay(1);
+}
+
+// ======================= NUEVAS FUNCIONES OPTIMIZADAS =======================
+
+// OPTIMIZACIÓN: Procesamiento de comandos MÁS RÁPIDO
+void procesarComandosRapido() {
+  // Leer todo el buffer serial disponible de una vez
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    inputString += c;
+    
+    // Procesar inmediatamente si tenemos comando completo
+    if (c == '\n' || c == '\r') {
+      String line = inputString;
+      line.trim();
+      if (line.length() > 0) {
+        procesarComandoRapido(line);
+      }
+      inputString = "";
+    }
+  }
+  
+  // OPTIMIZACIÓN: Procesar comandos TCP también rápidos
+  if (wifi_server_running) {
+    if (!clientTCP || !clientTCP.connected()) {
+      WiFiClient candidate = server.available();
+      if (candidate && candidate.connected()) {
+        clientTCP = candidate;
+        Serial.println("🌐 Cliente TCP conectado.");
+      }
+    }
+
+    if (clientTCP && clientTCP.connected() && clientTCP.available()) {
+      String cmd = clientTCP.readStringUntil('\n');
+      cmd.trim();
+      if (cmd.length() > 0) {
+        Serial.printf("🌐 [WiFi] Recibido: %s\n", cmd.c_str());
+        procesarComandoRapido(cmd);
+        clientTCP.println("OK: " + cmd);
+      }
+    }
+  }
+}
+
+// OPTIMIZACIÓN: Procesador de comandos más rápido
+void procesarComandoRapido(String cmd) {
+  cmd.trim();
+  if (cmd.length() == 0) return;
+  
+  lastCommandTime = millis();
+  commandInProgress = true;
+
+  String up = cmd;
+  up.toUpperCase();
+
+  // Comandos INMEDIATOS (sin procesamiento complejo) - MÁS RÁPIDOS
+  if (up == "ON") {
+    emergencyStop = false;
+    motoresActivos = true;
+    Serial.println("🔌 Motores energizados.");
+    commandInProgress = false;
+    return;
+  }
+  
+  if (up == "OFF") {
+    motoresActivos = false;
+    Serial.println("⚙️ Motores apagados.");
+    commandInProgress = false;
+    return;
+  }
+  
+  if (up == "ABRIR") {
+    if (motoresActivos && !emergencyStop) {
+      garra.write(posAbierta);
+      current_deg[4] = posAbierta;
+      Serial.println("🟢 Garra abierta");
+    } else Serial.println("⚠️ No energizado o E-STOP.");
+    commandInProgress = false;
+    return;
+  }
+  
+  if (up == "CERRAR") {
+    if (motoresActivos && !emergencyStop) {
+      garra.write(posCerrada);
+      current_deg[4] = posCerrada;
+      Serial.println("🔴 Garra cerrada");
+    } else Serial.println("⚠️ No energizado o E-STOP.");
+    commandInProgress = false;
+    return;
+  }
+  
+  if (up == "STOP" || up == "ESTOP" || up == "E-STOP") {
+    emergencyStop = true;
+    motoresActivos = false;
+    for (int i = 0; i < 4; ++i) {
+      digitalWrite(stepPins[i], LOW);
+      digitalWrite(dirPins[i], LOW);
+    }
+    Serial.println("⛔ EMERGENCY STOP activado.");
+    commandInProgress = false;
+    return;
+  }
+
+  if (up == "RESET") {
+    emergencyStop = false;
+    motoresActivos = false;
+    for (int i = 0; i < 4; ++i) current_deg[i] = 0;
+    garra.write(posAbierta);
+    current_deg[4] = posAbierta;
+    Serial.println("🔁 RESET completado.");
+    commandInProgress = false;
+    return;
+  }
+
+  // Comandos que requieren movimiento (los procesamos normalmente)
+  if (up.startsWith("M")) {
+    procesarComando(cmd);
+  } else if (up.startsWith("POS")) {
+    procesarComando(cmd);
+  } else if (up.startsWith("MODE:")) {
+    procesarComando(cmd);
+  } else {
+    Serial.printf("📨 Comando desconocido: %s\n", cmd.c_str());
+    commandInProgress = false;
+  }
+}
+
+void verificarConexionWiFi() {
+  if (millis() - lastWifiCheck > WIFI_CHECK_INTERVAL) {
+    if (WiFi.status() != WL_CONNECTED && wifi_status != WIFI_DISCONNECTED) {
+      Serial.println("⚠️ WiFi desconectado. Intentando reconectar...");
+      wifi_status = WIFI_DISCONNECTED;
+      if (AUTO_WIFI) {
+        start_wifi_server(TCP_PORT_DEFAULT);
+      }
+    } else if (WiFi.status() == WL_CONNECTED && wifi_status == WIFI_DISCONNECTED) {
+      Serial.println("✅ WiFi reconectado!");
+      wifi_status = WIFI_CONNECTED;
+    }
+    lastWifiCheck = millis();
+  }
+}
+
+// OPTIMIZACIÓN: Envío a nube más rápido
+void enviarEstadoALaNube() {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    
+    String url = String(CLOUD_API_URL) + "/api/status/update";
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+    http.setTimeout(2000); // OPTIMIZACIÓN: Timeout de 2 segundos
+    
+    String jsonData = generarJSONEstado();
+    
+    int httpCode = http.POST(jsonData);
+    
+    if (httpCode == 200) {
+      Serial.println("📡 Estado enviado a la nube ✅");
+      digitalWrite(STATUS_LED, HIGH);
+    } else {
+      Serial.printf("❌ Error enviando a nube: %d\n", httpCode);
+      digitalWrite(STATUS_LED, LOW);
+    }
+    
+    http.end();
+  }
+}
+
+String generarJSONEstado() {
+  String json = "{";
+  json += "\"esp32_id\":\"" + ESP32_ID + "\",";
+  json += "\"motor1_deg\":" + String(current_deg[0]) + ",";
+  json += "\"motor2_deg\":" + String(current_deg[1]) + ",";
+  json += "\"motor3_deg\":" + String(current_deg[2]) + ",";
+  json += "\"motor4_deg\":" + String(current_deg[3]) + ",";
+  json += "\"garra_state\":\"" + String(current_deg[4] == posCerrada ? "CERRADA" : "ABIERTA") + "\",";
+  json += "\"emergency_stop\":" + String(emergencyStop ? "true" : "false") + ",";
+  json += "\"motors_active\":" + String(motoresActivos ? "true" : "false") + ",";
+  json += "\"connection_mode\":\"WIFI\",";
+  json += "\"wifi_signal\":" + String(WiFi.RSSI());
+  json += "}";
+  return json;
+}
+
+void actualizarEstadoWiFi() {
+  if (WiFi.status() == WL_CONNECTED) {
+    wifi_status = WIFI_CONNECTED;
+  } else {
+    wifi_status = WIFI_DISCONNECTED;
+  }
+}
+
+// ======================= LED MEJORADO =======================
+void update_wifi_led() {
+  unsigned long now = millis();
+  
+  switch(wifi_status) {
+    case WIFI_DISCONNECTED:
+      if (now - ledLastToggle >= 250) {
+        ledState = !ledState;
+        digitalWrite(WIFI_LED, ledState);
+        ledLastToggle = now;
+      }
+      break;
+      
+    case WIFI_CONNECTING:
+      if (now - ledLastToggle >= 500) {
+        ledState = !ledState;
+        digitalWrite(WIFI_LED, ledState);
+        ledLastToggle = now;
+      }
+      break;
+      
+    case WIFI_CONNECTED:
+      if (!ledState) {
+        digitalWrite(WIFI_LED, HIGH);
+        ledState = HIGH;
+      }
+      break;
+      
+    case WIFI_CLOUD_READY:
+      if (now - ledLastToggle >= 1000) {
+        ledState = !ledState;
+        digitalWrite(WIFI_LED, ledState);
+        ledLastToggle = now;
+      }
+      break;
+  }
+}
+
+// ======================= WIFI FUNCIONES OPTIMIZADAS =======================
+void start_wifi_server(uint16_t port) {
+  if (wifi_server_running) {
+    Serial.println("🟢 Wi-Fi server ya corriendo.");
+    return;
+  }
+
+  Serial.printf("🔌 Intentando conectar Wi-Fi a '%s' ...\n", ssid);
+  wifi_connecting = true;
+  wifi_status = WIFI_CONNECTING;
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+
+  // OPTIMIZACIÓN: Timeout reducido de 15s a 10s
+  unsigned long start = millis();
+  const unsigned long timeout = 10000;
+  
+  while (WiFi.status() != WL_CONNECTED && millis() - start < timeout) {
+    delay(300); // OPTIMIZACIÓN: Delay reducido de 500 a 300ms
+    Serial.print(".");
+  }
+
+  wifi_connecting = false;
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n✅ Conectado al Wi-Fi!");
+    Serial.print("📡 IP local: "); Serial.println(WiFi.localIP());
+    Serial.print("📶 Señal WiFi: ");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
+    
+    server.begin(port);
+    wifi_server_running = true;
+    wifi_status = WIFI_CONNECTED;
+    Serial.printf("🟢 Servidor TCP activo en puerto %d\n", port);
+    Serial.println("🌐 Listo para conexiones TCP y envío a la nube");
+    
+  } else {
+    Serial.println("\n❌ No se pudo conectar al Wi-Fi.");
+    wifi_server_running = false;
+    wifi_status = WIFI_DISCONNECTED;
+    WiFi.disconnect(true);
+  }
+}
+
+void stop_wifi_server() {
+  if (!wifi_server_running && WiFi.status() != WL_CONNECTED) {
+    Serial.println("🔴 stop_wifi_server() llamado pero no había servidor/wi-fi activo.");
+    return;
+  }
+  if (clientTCP && clientTCP.connected()) {
+    clientTCP.stop();
+    Serial.println("🔌 Cliente TCP desconectado.");
+  }
+  server.stop();
+  WiFi.disconnect(true);
+  wifi_server_running = false;
+  wifi_connecting = false;
+  wifi_status = WIFI_DISCONNECTED;
+  Serial.println("🔴 Wi-Fi detenido.");
+}
+
+void mantener_wifi() {
+  if (AUTO_WIFI && !wifi_server_running) {
+    if (WiFi.status() != WL_CONNECTED && !wifi_connecting) {
+      static unsigned long lastTry = 0;
+      // OPTIMIZACIÓN: Intervalo aumentado de 8s a 12s
+      if (millis() - lastTry > 12000) {
+        Serial.println("🔄 AUTO_WIFI: intentando reconectar...");
+        start_wifi_server(TCP_PORT_DEFAULT);
+        lastTry = millis();
+      }
+    }
+  }
+}
+
+// ======================= COMANDOS (ORIGINAL PERO MÁS RÁPIDOS) =======================
+void procesarComando(String cmd) {
+  cmd.trim();
+  if (cmd.length() == 0) return;
+
+  String up = cmd;
+  up.toUpperCase();
+
+  // MODE handlers
+  if (up.startsWith("MODE:WIFI")) {
+    Serial.println("📡 Petición: MODE:WIFI");
+    start_wifi_server(TCP_PORT_DEFAULT);
+    commandInProgress = false;
+    return;
+  }
+  if (up.startsWith("MODE:SERIAL")) {
+    Serial.println("🔌 Petición: MODE:SERIAL");
+    stop_wifi_server();
+    commandInProgress = false;
+    return;
+  }
+
+  // Motor direct command: M#,DIR,pasos,vel
+  if (up.startsWith("M")) {
+    int idx1 = cmd.indexOf(',');
+    int idx2 = cmd.indexOf(',', idx1 + 1);
+    int idx3 = cmd.indexOf(',', idx2 + 1);
+    if (idx1 == -1 || idx2 == -1 || idx3 == -1) {
+      Serial.println("❌ Formato inválido (M#,...).");
+      commandInProgress = false;
+      return;
+    }
+    int motor = cmd.substring(1, idx1).toInt() - 1;
+    String direccion = cmd.substring(idx1 + 1, idx2);
+    int pasos = cmd.substring(idx2 + 1, idx3).toInt();
+    int velocidad = cmd.substring(idx3 + 1).toInt();
+    if (motor >= 0 && motor < 4) {
+      if (motoresActivos && !emergencyStop) {
+        bool sentidoHorario = (direccion == "H");
+        moverMotorPasos(motor, pasos, sentidoHorario, velocidad);
+        float grados = ((float)pasos / 200.0) * 360.0;
+        current_deg[motor] = fmod((current_deg[motor] + grados + 360.0), 360.0);
+        Serial.printf("✅ Motor %d movido (%.1f deg, vel=%d)\n", motor+1, grados, velocidad);
+      } else Serial.println("⚠️ No energizado o E-STOP.");
+    } else Serial.println("❌ Motor fuera de rango.");
+    commandInProgress = false;
+    return;
+  }
+
+  // POS command: POS,d1,d2,d3,d4,d5,vel
+  if (up.startsWith("POS")) {
+    int posComma = cmd.indexOf(',');
+    String rest;
+    if (posComma != -1) rest = cmd.substring(posComma + 1);
+    else {
+      Serial.println("❌ POS formato inválido.");
+      commandInProgress = false;
+      return;
+    }
+
+    std::vector<String> parts;
+    int start = 0;
+    for (int i = 0; i <= rest.length(); ++i) {
+      if (i == rest.length() || rest.charAt(i) == ',') {
+        parts.push_back(rest.substring(start, i));
+        start = i + 1;
+      }
+    }
+    if ((int)parts.size() < 6) {
+      Serial.println("❌ POS formato inválido. Use: POS,d1,d2,d3,d4,d5,vel");
+      commandInProgress = false;
+      return;
+    }
+
+    float targets[5];
+    for (int i = 0; i < 5; ++i) targets[i] = parts[i].toFloat();
+    int vel = parts[5].toInt();
+
+    if (!motoresActivos || emergencyStop) {
+      Serial.println("⚠️ Motores desenergizados o E-STOP.");
+      commandInProgress = false;
+      return;
+    }
+    moverMotorSecuencialDesdePos(targets, vel);
+    return;
+  }
+
+  Serial.printf("📨 Comando desconocido: %s\n", cmd.c_str());
+  commandInProgress = false;
+}
+
+// ======================= MOVIMIENTOS OPTIMIZADOS =======================
+long grados_a_pasos(float grados) {
+  float pasos = (grados/360.0) * 200.0;
+  return (long)round(abs(pasos));
+}
+
+// OPTIMIZACIÓN: Movimiento más rápido
+void moverMotorPasos(int motor, long pasos, bool sentidoHorario, int velocidad) {
+  if (motor < 0 || motor > 3) return;
+  if (pasos <= 0) return;
+  digitalWrite(dirPins[motor], sentidoHorario ? HIGH : LOW);
+  delayMicroseconds(100); // OPTIMIZACIÓN: Reducido de 1000 a 100
+  
+  // OPTIMIZACIÓN: Velocidad más rápida
+  int delayMicros = map(velocidad, 1, 1000, 1200, 200); // Más rápido
+  delayMicros = constrain(delayMicros, 200, 1200);
+  
+  for (long i=0; i<pasos; i++) {
+    digitalWrite(stepPins[motor], HIGH);
+    delayMicroseconds(delayMicros);
+    digitalWrite(stepPins[motor], LOW);
+    delayMicroseconds(delayMicros);
+    if (emergencyStop) {
+      Serial.println("⛔ E-STOP detectado. Parando motor.");
+      commandInProgress = false;
+      return;
+    }
+  }
+  commandInProgress = false;
+}
+
+void moverMotorPorDeltaDeg(int motor, float delta_deg, int velocidad) {
+  if (motor < 0 || motor > 3) return;
+  if (abs(delta_deg) < 0.5) return;
+  bool sentidoHorario = (delta_deg > 0);
+  long pasos = grados_a_pasos(abs(delta_deg));
+  moverMotorPasos(motor, pasos, sentidoHorario, velocidad);
+  current_deg[motor] += delta_deg;
+  while (current_deg[motor] >= 360.0) current_deg[motor] -= 360.0;
+  while (current_deg[motor] < 0.0) current_deg[motor] += 360.0;
+}
+
+// OPTIMIZACIÓN: Movimiento secuencial más rápido
+void moverMotorSecuencialDesdePos(float target_deg[5], int velocidad) {
+  Serial.println("➡ POS: iniciando secuencia...");
+  for (int m=0; m<4; m++) {
+    float delta = target_deg[m] - current_deg[m];
+    while (delta > 180.0) delta -= 360.0;
+    while (delta < -180.0) delta += 360.0;
+    if (abs(delta) >= 0.5) {
+      Serial.printf("➡️ M%d: delta=%.2f deg -> %ld pasos\n", m+1, delta, grados_a_pasos(abs(delta)));
+      moverMotorPorDeltaDeg(m, delta, velocidad);
+      if (emergencyStop) {
+        Serial.println("⛔ E-STOP activado, abortando secuencia POS.");
+        commandInProgress = false;
+        return;
+      }
+      delay(80); // OPTIMIZACIÓN: Reducido de 120 a 80ms
+    }
+  }
+
+  if (target_deg[4] >= 90.0) {
+    garra.write(posCerrada);
+    current_deg[4] = posCerrada;
+    Serial.println("🔐 Garra cerrada (POS)");
+  } else {
+    garra.write(posAbierta);
+    current_deg[4] = posAbierta;
+    Serial.println("🔓 Garra abierta (POS)");
+  }
+
+  Serial.println("✅ Movimiento POS completo.");
+  commandInProgress = false;
+}
