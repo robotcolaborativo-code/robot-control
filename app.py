@@ -1,12 +1,10 @@
 from flask import Flask, jsonify, render_template_string, request
-from flask_cors import CORS
 import mysql.connector
 import os
 import time
 import traceback
 
 app = Flask(__name__)
-CORS(app)  # Añadir CORS para permitir requests del ESP32
 
 # ======================= CONEXIÓN MYSQL =======================
 def get_db_connection():
@@ -17,8 +15,7 @@ def get_db_connection():
             password=os.environ.get('MYSQL_PASSWORD', 'QttFmgSWJcoJfFKJNFwuscHPWPSESxWs'),
             database=os.environ.get('MYSQL_DATABASE', 'railway'),
             port=int(os.environ.get('MYSQL_PORT', 57488)),
-            connect_timeout=10,
-            autocommit=True  # Añadir autocommit
+            connect_timeout=10
         )
         return conn
     except Exception as e:
@@ -88,13 +85,13 @@ def setup_database():
         ''')
         
         # Insertar estado inicial si no existe
-        cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'cobot_01'")
+        cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'CDBOT_001'")
         if not cursor.fetchone():
             cursor.execute('''
                 INSERT INTO moduls_tellis 
                 (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta, velocidad_actual) 
                 VALUES 
-                ('cobot_01', 0, 0, 0, 0, 0, 0, 1, 500)
+                ('CDBOT_001', 1, 0, 0, 0, 0, 0, 1, 500)
             ''')
         
         conn.commit()
@@ -110,7 +107,7 @@ def setup_database():
 # Configurar base de datos al inicio
 setup_database()
 
-# ======================= HTML DASHBOARD ACTUALIZADO =======================
+# ======================= HTML DASHBOARD COMPLETO =======================
 HTML_DASHBOARD = '''
 <!DOCTYPE html>
 <html>
@@ -164,7 +161,6 @@ HTML_DASHBOARD = '''
         .posicion-actions { display: flex; gap: 5px; }
         .btn-small { padding: 5px 10px; font-size: 0.8em; }
         .pulse { animation: pulse 2s infinite; }
-        .velocidad-info { background: rgba(255, 193, 7, 0.2); border: 1px solid #ffc107; padding: 10px; border-radius: 5px; margin: 10px 0; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
@@ -225,14 +221,6 @@ HTML_DASHBOARD = '''
                     </div>
                 </div>
 
-                <!-- INFORMACIÓN DE VELOCIDADES PREDEFINIDAS -->
-                <div class="velocidad-info">
-                    <h4>⚡ Configuración de Velocidades</h4>
-                    <p><strong>M3:</strong> Velocidad fija 35 RPM</p>
-                    <p><strong>M4:</strong> Velocidad fija 1000 RPM</p>
-                    <p><strong>M1 y M2:</strong> Control variable (1-1500 RPM)</p>
-                </div>
-
                 <div class="control-group">
                     <h3>🔌 Configuración de Conexión</h3>
                     <div class="btn-grid">
@@ -262,7 +250,6 @@ HTML_DASHBOARD = '''
                 <div class="animation-container">
                     <div class="robot-visual pulse">🤖</div>
                     <p style="margin-top: 15px; opacity: 0.8;">Robot 4DOF + Garra</p>
-                    <p style="opacity: 0.7; font-size: 0.9em;">Actualización en tiempo real</p>
                 </div>
             </div>
 
@@ -276,10 +263,10 @@ HTML_DASHBOARD = '''
                     <div class="input-group">
                         <label for="motor-select">Motor:</label>
                         <select id="motor-select">
-                            <option value="1">M1 - Motor 1 (Vel: 1-1500)</option>
-                            <option value="2">M2 - Motor 2 (Vel: 1-1500)</option>
-                            <option value="3">M3 - Motor 3 (Vel: Fija 35)</option>
-                            <option value="4">M4 - Motor 4 (Vel: Fija 1000)</option>
+                            <option value="1">M1 - Motor 1</option>
+                            <option value="2">M2 - Motor 2</option>
+                            <option value="3">M3 - Motor 3</option>
+                            <option value="4">M4 - Motor 4</option>
                         </select>
                     </div>
 
@@ -290,7 +277,7 @@ HTML_DASHBOARD = '''
 
                     <div class="input-group">
                         <label for="velocidad-input">Velocidad (RPM):</label>
-                        <input type="number" id="velocidad-input" value="500" min="1" max="1500">
+                        <input type="number" id="velocidad-input" value="500" min="1" max="1000">
                     </div>
 
                     <div class="btn-grid">
@@ -303,7 +290,7 @@ HTML_DASHBOARD = '''
                     <h3>🎯 Control por Posición</h3>
                     
                     <div class="motor-control">
-                        <h4>Motor 1 (M1) - Velocidad variable</h4>
+                        <h4>Motor 1 (M1)</h4>
                         <div class="input-group">
                             <label>Posición (0-360°):</label>
                             <input type="number" id="pos-m1" value="0" min="0" max="360" step="1">
@@ -311,7 +298,7 @@ HTML_DASHBOARD = '''
                     </div>
 
                     <div class="motor-control">
-                        <h4>Motor 2 (M2) - Velocidad variable</h4>
+                        <h4>Motor 2 (M2)</h4>
                         <div class="input-group">
                             <label>Posición (0-360°):</label>
                             <input type="number" id="pos-m2" value="0" min="0" max="360" step="1">
@@ -319,7 +306,7 @@ HTML_DASHBOARD = '''
                     </div>
 
                     <div class="motor-control">
-                        <h4>Motor 3 (M3) - Velocidad fija 35</h4>
+                        <h4>Motor 3 (M3)</h4>
                         <div class="input-group">
                             <label>Posición (0-360°):</label>
                             <input type="number" id="pos-m3" value="0" min="0" max="360" step="1">
@@ -327,7 +314,7 @@ HTML_DASHBOARD = '''
                     </div>
 
                     <div class="motor-control">
-                        <h4>Motor 4 (M4) - Velocidad fija 1000</h4>
+                        <h4>Motor 4 (M4)</h4>
                         <div class="input-group">
                             <label>Posición (0-360°):</label>
                             <input type="number" id="pos-m4" value="0" min="0" max="360" step="1">
@@ -335,8 +322,8 @@ HTML_DASHBOARD = '''
                     </div>
 
                     <div class="input-group">
-                        <label for="velocidad-pos">Velocidad M1/M2 (RPM):</label>
-                        <input type="number" id="velocidad-pos" value="500" min="1" max="1500">
+                        <label for="velocidad-pos">Velocidad (RPM):</label>
+                        <input type="number" id="velocidad-pos" value="500" min="1" max="1000">
                     </div>
 
                     <button class="btn" onclick="moverPosicion()" style="width: 100%; margin-top: 10px;">🧭 MOVER A POSICIÓN</button>
@@ -361,7 +348,6 @@ HTML_DASHBOARD = '''
     <script>
         let modoConexionActual = 'SERIAL';
         let posicionesGuardadas = [];
-        let ultimaActualizacion = null;
 
         function showAlert(message, type = 'success') {
             const alertContainer = document.getElementById('alert-container');
@@ -387,13 +373,6 @@ HTML_DASHBOARD = '''
                 indicator.className = 'status-indicator status-disconnected';
                 text.textContent = 'Desconectado';
             }
-        }
-
-        function actualizarTiempoUltimaActualizacion() {
-            const ahora = new Date();
-            ultimaActualizacion = ahora;
-            document.getElementById('conexion-text').textContent = 
-                `Conectado vía ${modoConexionActual} | Última actualización: ${ahora.toLocaleTimeString()}`;
         }
 
         async function cambiarModoConexion(modo) {
@@ -427,42 +406,17 @@ HTML_DASHBOARD = '''
                     document.getElementById('estado-container').innerHTML = `<div class="alert error">❌ ${estado.error}</div>`;
                     return;
                 }
-                
-                // Actualizar estado general
                 document.getElementById('motores-activos').textContent = estado.motores_activos ? 'ACTIVOS' : 'INACTIVOS';
                 document.getElementById('motores-activos').className = estado.motores_activos ? 'value active' : 'value';
                 document.getElementById('emergency-stop').textContent = estado.emergency_stop ? 'ACTIVADA' : 'NORMAL';
                 document.getElementById('garra-estado').textContent = estado.garra_abierta ? 'ABIERTA' : 'CERRADA';
                 document.getElementById('velocidad-actual').textContent = estado.velocidad_actual + ' RPM';
-                
-                // Actualizar posiciones con animación
-                actualizarPosicionConAnimacion('posicion-m1', estado.posicion_m1);
-                actualizarPosicionConAnimacion('posicion-m2', estado.posicion_m2);
-                actualizarPosicionConAnimacion('posicion-m3', estado.posicion_m3);
-                actualizarPosicionConAnimacion('posicion-m4', estado.posicion_m4);
-                
-                actualizarTiempoUltimaActualizacion();
-                
+                document.getElementById('posicion-m1').textContent = estado.posicion_m1 + '°';
+                document.getElementById('posicion-m2').textContent = estado.posicion_m2 + '°';
+                document.getElementById('posicion-m3').textContent = estado.posicion_m3 + '°';
+                document.getElementById('posicion-m4').textContent = estado.posicion_m4 + '°';
             } catch (error) {
                 console.error('Error actualizando estado:', error);
-                document.getElementById('conexion-text').textContent = 'Error de conexión con el servidor';
-            }
-        }
-
-        function actualizarPosicionConAnimacion(elementId, nuevoValor) {
-            const elemento = document.getElementById(elementId);
-            const valorActual = parseFloat(elemento.textContent) || 0;
-            const diferencia = Math.abs(nuevoValor - valorActual);
-            
-            if (diferencia > 0.1) { // Solo animar si hay cambio significativo
-                elemento.style.color = '#ffc107'; // Amarillo durante cambio
-                elemento.textContent = nuevoValor.toFixed(1) + '°';
-                
-                setTimeout(() => {
-                    elemento.style.color = '#00b4db'; // Volver al color original
-                }, 1000);
-            } else {
-                elemento.textContent = nuevoValor.toFixed(1) + '°';
             }
         }
 
@@ -549,8 +503,7 @@ HTML_DASHBOARD = '''
                 const result = await response.json();
                 if (result.status === 'success') {
                     showAlert(`✅ Comando ${comando} enviado correctamente`);
-                    // Actualizar estado inmediatamente después del comando
-                    setTimeout(actualizarEstado, 1000);
+                    actualizarEstado();
                 } else {
                     showAlert(`❌ Error: ${result.error}`, 'error');
                 }
@@ -567,22 +520,10 @@ HTML_DASHBOARD = '''
             const motor = document.getElementById('motor-select').value;
             const pasos = document.getElementById('pasos-input').value;
             const velocidad = document.getElementById('velocidad-input').value;
-            
             if (!pasos || pasos < 1) {
                 showAlert('⚠️ Ingresa un número válido de pasos', 'warning');
                 return;
             }
-            
-            // Mostrar información de velocidad según el motor
-            const motorInfo = {
-                '3': 'M3 usa velocidad fija 35 RPM',
-                '4': 'M4 usa velocidad fija 1000 RPM'
-            };
-            
-            if (motorInfo[motor]) {
-                showAlert(`ℹ️ ${motorInfo[motor]}`, 'warning');
-            }
-            
             try {
                 const response = await fetch('/api/mover_motor', {
                     method: 'POST',
@@ -597,8 +538,7 @@ HTML_DASHBOARD = '''
                 const result = await response.json();
                 if (result.status === 'success') {
                     showAlert(`✅ Motor M${motor} movido ${direccion === 'H' ? 'horario' : 'antihorario'}`);
-                    // Actualizar estado después del movimiento
-                    setTimeout(actualizarEstado, 1500);
+                    actualizarEstado();
                 } else {
                     showAlert(`❌ Error: ${result.error}`, 'error');
                 }
@@ -615,16 +555,12 @@ HTML_DASHBOARD = '''
                 parseFloat(document.getElementById('pos-m4').value)
             ];
             const velocidad = parseInt(document.getElementById('velocidad-pos').value);
-            
             for (let i = 0; i < posiciones.length; i++) {
                 if (posiciones[i] < 0 || posiciones[i] > 360) {
                     showAlert(`⚠️ Posición M${i+1} fuera de rango (0-360°)`, 'warning');
                     return;
                 }
             }
-            
-            showAlert('🔄 Ejecutando movimiento secuencial...', 'warning');
-            
             try {
                 const response = await fetch('/api/mover_posicion', {
                     method: 'POST',
@@ -634,8 +570,7 @@ HTML_DASHBOARD = '''
                 const result = await response.json();
                 if (result.status === 'success') {
                     showAlert('✅ Movimiento a posición ejecutado');
-                    // Actualizar estado después del movimiento completo
-                    setTimeout(actualizarEstado, 3000);
+                    actualizarEstado();
                 } else {
                     showAlert(`❌ Error: ${result.error}`, 'error');
                 }
@@ -676,15 +611,12 @@ HTML_DASHBOARD = '''
             }
         }
 
-        // Actualización más frecuente para mejor tiempo real
-        setInterval(actualizarEstado, 2000); // Cada 2 segundos
-        setInterval(cargarPosiciones, 10000); // Cada 10 segundos
-        
+        setInterval(actualizarEstado, 3000);
+        setInterval(cargarPosiciones, 5000);
         document.addEventListener('DOMContentLoaded', function() {
             actualizarEstado();
             cargarPosiciones();
             actualizarIndicadorConexion('SERIAL', 'conectado');
-            actualizarTiempoUltimaActualizacion();
         });
     </script>
 </body>
@@ -708,7 +640,7 @@ def enviar_comando(accion):
         
         cursor.execute(
             "INSERT INTO comandos_robot (esp32_id, comando) VALUES (%s, %s)",
-            ('cobot_01', accion.upper())
+            ('CDBOT_001', accion.upper())
         )
         conn.commit()
         cursor.close()
@@ -734,7 +666,7 @@ def cambiar_conexion():
         
         cursor.execute(
             "INSERT INTO comandos_robot (esp32_id, comando, modo_conexion) VALUES (%s, %s, %s)",
-            ('cobot_01', f'MODE:{modo}', modo)
+            ('CDBOT_001', f'MODE:{modo}', modo)
         )
         conn.commit()
         cursor.close()
@@ -765,7 +697,7 @@ def mover_motor():
             """INSERT INTO comandos_robot 
             (esp32_id, comando, motor_num, pasos, velocidad, direccion) 
             VALUES (%s, %s, %s, %s, %s, %s)""",
-            ('cobot_01', 'MOVER_MOTOR', motor, pasos, velocidad, direccion)
+            ('CDBOT_001', 'MOVER_MOTOR', motor, pasos, velocidad, direccion)
         )
         conn.commit()
         cursor.close()
@@ -797,7 +729,7 @@ def mover_posicion():
             """INSERT INTO comandos_robot 
             (esp32_id, comando, posicion_m1, posicion_m2, posicion_m3, posicion_m4, velocidad) 
             VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-            ('cobot_01', 'MOVIMIENTO_POSICION', 
+            ('CDBOT_001', 'MOVIMIENTO_POSICION', 
              posiciones[0], posiciones[1], posiciones[2], posiciones[3], velocidad)
         )
         conn.commit()
@@ -847,7 +779,7 @@ def obtener_posiciones():
         if conn is None:
             return jsonify({"status": "error", "error": "No database connection"}), 500
             
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()
         
         cursor.execute("SELECT * FROM posiciones_guardadas ORDER BY nombre")
         posiciones = cursor.fetchall()
@@ -858,13 +790,13 @@ def obtener_posiciones():
         posiciones_list = []
         for pos in posiciones:
             posiciones_list.append({
-                "id": pos["id"],
-                "nombre": pos["nombre"],
-                "posicion_m1": float(pos["posicion_m1"]),
-                "posicion_m2": float(pos["posicion_m2"]),
-                "posicion_m3": float(pos["posicion_m3"]),
-                "posicion_m4": float(pos["posicion_m4"]),
-                "velocidad": int(pos["velocidad"]) if pos["velocidad"] else 500
+                "id": pos[0],
+                "nombre": pos[1],
+                "posicion_m1": float(pos[2]),
+                "posicion_m2": float(pos[3]),
+                "posicion_m3": float(pos[4]),
+                "posicion_m4": float(pos[5]),
+                "velocidad": int(pos[7])
             })
         
         return jsonify({"status": "success", "posiciones": posiciones_list})
@@ -880,7 +812,7 @@ def cargar_posicion(posicion_id):
         if conn is None:
             return jsonify({"status": "error", "error": "No database connection"}), 500
             
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()
         
         cursor.execute("SELECT * FROM posiciones_guardadas WHERE id = %s", (posicion_id,))
         posicion = cursor.fetchone()
@@ -890,13 +822,13 @@ def cargar_posicion(posicion_id):
         
         if posicion:
             posicion_data = {
-                "id": posicion["id"],
-                "nombre": posicion["nombre"],
-                "posicion_m1": float(posicion["posicion_m1"]),
-                "posicion_m2": float(posicion["posicion_m2"]),
-                "posicion_m3": float(posicion["posicion_m3"]),
-                "posicion_m4": float(posicion["posicion_m4"]),
-                "velocidad": int(posicion["velocidad"]) if posicion["velocidad"] else 500
+                "id": posicion[0],
+                "nombre": posicion[1],
+                "posicion_m1": float(posicion[2]),
+                "posicion_m2": float(posicion[3]),
+                "posicion_m3": float(posicion[4]),
+                "posicion_m4": float(posicion[5]),
+                "velocidad": int(posicion[7])
             }
             return jsonify({"status": "success", "posicion": posicion_data})
         else:
@@ -934,9 +866,9 @@ def obtener_estado():
         if conn is None:
             return jsonify({"status": "error", "error": "No database connection"}), 500
             
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()
         
-        cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'cobot_01' ORDER BY timestamp DESC LIMIT 1")
+        cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'CDBOT_001' ORDER BY timestamp DESC LIMIT 1")
         estado = cursor.fetchone()
         
         cursor.close()
@@ -944,14 +876,14 @@ def obtener_estado():
         
         if estado:
             return jsonify({
-                "motores_activos": bool(estado["motores_activos"]),
-                "emergency_stop": bool(estado["emergency_stop"]), 
-                "posicion_m1": float(estado["posicion_m1"]),
-                "posicion_m2": float(estado["posicion_m2"]),
-                "posicion_m3": float(estado["posicion_m3"]),
-                "posicion_m4": float(estado["posicion_m4"]),
-                "garra_abierta": bool(estado["garra_abierta"]),
-                "velocidad_actual": int(estado["velocidad_actual"])
+                "motores_activos": bool(estado[2]),
+                "emergency_stop": bool(estado[3]), 
+                "posicion_m1": float(estado[4]),
+                "posicion_m2": float(estado[5]),
+                "posicion_m3": float(estado[6]),
+                "posicion_m4": float(estado[7]),
+                "garra_abierta": bool(estado[8]),
+                "velocidad_actual": int(estado[9])
             })
         else:
             return jsonify({"error": "No se encontró estado del robot"})
@@ -960,15 +892,15 @@ def obtener_estado():
         return jsonify({"status": "error", "error": str(e)}), 500
 
 # ======================= RUTAS PARA COMUNICACIÓN CON ESP32 =======================
-@app.route('/api/comandos_pendientes/<esp32_id>', methods=['GET'])
+@app.route('/api/comandos_pendientes/<esp32_id>')
 def obtener_comandos_pendientes(esp32_id):
-    """Obtener comandos pendientes para un ESP32 - CORREGIDO"""
+    """Obtener comandos pendientes para un ESP32"""
     try:
         conn = get_db_connection()
         if conn is None:
             return jsonify({"status": "error", "error": "No database connection"}), 500
             
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()
         
         # Obtener comandos no ejecutados
         cursor.execute(
@@ -980,23 +912,22 @@ def obtener_comandos_pendientes(esp32_id):
         comandos_list = []
         for cmd in comandos:
             comando_data = {
-                "id": cmd["id"],
-                "comando": cmd["comando"],
-                "parametros": cmd["parametros"],
-                "motor_num": cmd["motor_num"],
-                "pasos": cmd["pasos"],
-                "velocidad": cmd["velocidad"],
-                "direccion": cmd["direccion"],
-                "posicion_m1": cmd["posicion_m1"],
-                "posicion_m2": cmd["posicion_m2"],
-                "posicion_m3": cmd["posicion_m3"],
-                "posicion_m4": cmd["posicion_m4"]
+                "id": cmd[0],
+                "comando": cmd[2],
+                "motor_num": cmd[4],
+                "pasos": cmd[5],
+                "velocidad": cmd[6],
+                "direccion": cmd[7],
+                "posicion_m1": cmd[8],
+                "posicion_m2": cmd[9],
+                "posicion_m3": cmd[10],
+                "posicion_m4": cmd[11]
             }
             comandos_list.append(comando_data)
         
         # Marcar como ejecutados
         if comandos:
-            ids = [str(cmd["id"]) for cmd in comandos]
+            ids = [str(cmd[0]) for cmd in comandos]
             placeholders = ','.join(['%s'] * len(ids))
             cursor.execute(
                 f"UPDATE comandos_robot SET ejecutado = TRUE WHERE id IN ({placeholders})",
@@ -1007,13 +938,13 @@ def obtener_comandos_pendientes(esp32_id):
         cursor.close()
         conn.close()
         
-        return jsonify({"status": "success", "comandos": comandos_list, "count": len(comandos_list)})
+        return jsonify({"status": "success", "comandos": comandos_list})
         
     except Exception as e:
         print(f"❌ Error en comandos_pendientes: {e}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
-@app.route('/api/status/update', methods=['POST'])
+@app.route('/api/actualizar_estado', methods=['POST'])
 def actualizar_estado():
     """Actualizar estado del robot desde el ESP32"""
     try:
@@ -1029,22 +960,29 @@ def actualizar_estado():
             
         cursor = conn.cursor()
         
-        # Determinar estado de la garra
-        garra_abierta = data.get('garra_state') == 'ABIERTA'
-        
         cursor.execute('''
             INSERT INTO moduls_tellis 
             (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta, velocidad_actual) 
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+            motores_activos = VALUES(motores_activos),
+            emergency_stop = VALUES(emergency_stop),
+            posicion_m1 = VALUES(posicion_m1),
+            posicion_m2 = VALUES(posicion_m2),
+            posicion_m3 = VALUES(posicion_m3),
+            posicion_m4 = VALUES(posicion_m4),
+            garra_abierta = VALUES(garra_abierta),
+            velocidad_actual = VALUES(velocidad_actual),
+            timestamp = CURRENT_TIMESTAMP
         ''', (
-            data.get('esp32_id', 'cobot_01'),
+            data.get('esp32_id', 'CDBOT_001'),
             data.get('motors_active', False),
             data.get('emergency_stop', False),
             data.get('motor1_deg', 0),
             data.get('motor2_deg', 0), 
             data.get('motor3_deg', 0),
             data.get('motor4_deg', 0),
-            garra_abierta,
+            data.get('garra_state') == 'ABIERTA',
             data.get('velocidad_actual', 500)
         ))
         
