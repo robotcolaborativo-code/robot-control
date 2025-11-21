@@ -1,10 +1,21 @@
 from flask import Flask, jsonify, render_template_string, request
+from flask_cors import CORS
 import mysql.connector
 import os
 import time
 import traceback
+import threading
+import requests
+from datetime import datetime, timedelta
+import json
 
 app = Flask(__name__)
+CORS(app)
+
+# ======================= CONFIGURACIÓN =======================
+ESP32_IP = "10.31.183.131"  # IP del ESP32
+TCP_PORT = 8080
+SERIAL_MODE = False  # Por defecto usamos WiFi
 
 # ======================= CONEXIÓN MYSQL =======================
 def get_db_connection():
@@ -65,7 +76,10 @@ def setup_database():
                 posicion_m3 FLOAT,
                 posicion_m4 FLOAT,
                 garra_abierta BOOLEAN,
+                garra_grados FLOAT,
                 velocidad_actual INT,
+                conexion_wifi BOOLEAN,
+                senal_wifi INT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -85,13 +99,13 @@ def setup_database():
         ''')
         
         # Insertar estado inicial si no existe
-        cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'CDBOT_001'")
+        cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'cobot_01'")
         if not cursor.fetchone():
             cursor.execute('''
                 INSERT INTO moduls_tellis 
-                (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta, velocidad_actual) 
+                (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta, garra_grados, velocidad_actual, conexion_wifi, senal_wifi) 
                 VALUES 
-                ('CDBOT_001', 1, 0, 0, 0, 0, 0, 1, 500)
+                ('cobot_01', 0, 0, 0, 0, 0, 0, 1, 100, 500, 0, 0)
             ''')
         
         conn.commit()
@@ -104,10 +118,146 @@ def setup_database():
         print(f"❌ Error configurando BD: {e}")
         return False
 
+# ======================= COMUNICACIÓN CON ESP32 =======================
+def enviar_comando_esp32(comando):
+    """Enviar comando directamente al ESP32 vía TCP"""
+    try:
+        if SERIAL_MODE:
+            print(f"📡 [SERIAL] Comando enviado: {comando}")
+            return True
+            
+        # Modo WiFi - enviar via TCP
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        
+        try:
+            sock.connect((ESP32_IP, TCP_PORT))
+            sock.sendall(f"{comando}\n".encode())
+            response = sock.recv(1024).decode().strip()
+            sock.close()
+            
+            print(f"📡 [WiFi] Comando enviado: {comando} -> Respuesta: {response}")
+            return True
+            
+        except socket.timeout:
+            print(f"❌ [WiFi] Timeout enviando comando: {comando}")
+            return False
+        except ConnectionRefusedError:
+            print(f"❌ [WiFi] Conexión rechazada. Verifica que el ESP32 esté ejecutando el servidor TCP")
+            return False
+        except Exception as e:
+            print(f"❌ [WiFi] Error enviando comando: {e}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error general enviando comando: {e}")
+        return False
+
+def procesar_comando_bd(comando_data):
+    """Procesar comando desde la base de datos y enviarlo al ESP32"""
+    try:
+        comando = comando_data.get('comando', '')
+        motor_num = comando_data.get('motor_num')
+        pasos = comando_data.get('pasos')
+        velocidad = comando_data.get('velocidad')
+        direccion = comando_data.get('direccion')
+        posiciones = [
+            comando_data.get('posicion_m1'),
+            comando_data.get('posicion_m2'), 
+            comando_data.get('posicion_m3'),
+            comando_data.get('posicion_m4')
+        ]
+        
+        comando_final = ""
+        
+        # Comandos simples
+        if comando in ['ON', 'OFF', 'STOP', 'RESET', 'ABRIR', 'CERRAR']:
+            comando_final = comando
+            
+        # Comando de movimiento directo
+        elif comando == 'MOVER_MOTOR' and motor_num and pasos and velocidad and direccion:
+            comando_final = f"M{motor_num},{direccion},{pasos},{velocidad}"
+            
+        # Comando de posición
+        elif comando == 'MOVIMIENTO_POSICION' and all(p is not None for p in posiciones):
+            pos_str = ','.join(str(p) for p in posiciones)
+            comando_final = f"POS,{pos_str},{velocidad}"
+            
+        # Comando de cambio de modo
+        elif comando.startswith('MODE:'):
+            comando_final = comando
+            
+        else:
+            print(f"⚠️ Comando no reconocido: {comando_data}")
+            return False
+            
+        # Enviar comando al ESP32
+        if comando_final:
+            return enviar_comando_esp32(comando_final)
+        else:
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error procesando comando: {e}")
+        return False
+
+# ======================= THREAD PARA PROCESAR COMANDOS =======================
+def procesador_comandos():
+    """Thread que procesa comandos pendientes cada 2 segundos"""
+    while True:
+        try:
+            conn = get_db_connection()
+            if conn:
+                cursor = conn.cursor()
+                
+                # Obtener comandos pendientes
+                cursor.execute(
+                    "SELECT * FROM comandos_robot WHERE ejecutado = FALSE ORDER BY timestamp ASC LIMIT 5"
+                )
+                comandos = cursor.fetchall()
+                
+                for cmd in comandos:
+                    cmd_id = cmd[0]
+                    comando_data = {
+                        'comando': cmd[2],
+                        'motor_num': cmd[4],
+                        'pasos': cmd[5],
+                        'velocidad': cmd[6],
+                        'direccion': cmd[7],
+                        'posicion_m1': cmd[8],
+                        'posicion_m2': cmd[9],
+                        'posicion_m3': cmd[10],
+                        'posicion_m4': cmd[11]
+                    }
+                    
+                    # Procesar comando
+                    if procesar_comando_bd(comando_data):
+                        # Marcar como ejecutado
+                        cursor.execute(
+                            "UPDATE comandos_robot SET ejecutado = TRUE WHERE id = %s",
+                            (cmd_id,)
+                        )
+                        conn.commit()
+                        print(f"✅ Comando {cmd_id} ejecutado: {comando_data['comando']}")
+                    else:
+                        print(f"❌ Error ejecutando comando {cmd_id}")
+                
+                cursor.close()
+                conn.close()
+                
+        except Exception as e:
+            print(f"❌ Error en procesador de comandos: {e}")
+            
+        time.sleep(2)  # Esperar 2 segundos entre ciclos
+
+# Iniciar thread de procesamiento de comandos
+threading.Thread(target=procesador_comandos, daemon=True).start()
+
 # Configurar base de datos al inicio
 setup_database()
 
-# ======================= HTML DASHBOARD COMPLETO =======================
+# ======================= HTML DASHBOARD MEJORADO =======================
 HTML_DASHBOARD = '''
 <!DOCTYPE html>
 <html>
@@ -132,11 +282,13 @@ HTML_DASHBOARD = '''
         .status-item .value { font-size: 1.3em; font-weight: bold; color: #00b4db; }
         .status-item.emergency .value { color: #ff4444; }
         .status-item.active .value { color: #00C851; }
+        .status-item.warning .value { color: #ffbb33; }
         .control-group { margin-bottom: 25px; }
         .control-group h3 { font-size: 1.3em; margin-bottom: 15px; color: #00b4db; }
         .btn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 15px; }
         .btn { padding: 12px 20px; border: none; border-radius: 8px; font-size: 1em; font-weight: bold; cursor: pointer; transition: all 0.3s ease; text-align: center; background: linear-gradient(45deg, #00b4db, #0083b0); color: white; border: 2px solid transparent; }
         .btn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0, 180, 219, 0.4); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
         .btn-emergency { background: linear-gradient(45deg, #ff4444, #cc0000); }
         .btn-success { background: linear-gradient(45deg, #00C851, #007E33); }
         .btn-warning { background: linear-gradient(45deg, #ffbb33, #FF8800); }
@@ -154,6 +306,7 @@ HTML_DASHBOARD = '''
         .status-indicator { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
         .status-connected { background: #00C851; box-shadow: 0 0 10px #00C851; }
         .status-disconnected { background: #ff4444; box-shadow: 0 0 10px #ff4444; }
+        .status-connecting { background: #ffbb33; box-shadow: 0 0 10px #ffbb33; animation: pulse 1s infinite; }
         .posiciones-container { background: rgba(0, 0, 0, 0.2); padding: 15px; border-radius: 10px; margin-top: 15px; }
         .posicion-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; margin: 5px 0; background: rgba(255, 255, 255, 0.1); border-radius: 5px; cursor: pointer; transition: background 0.3s ease; }
         .posicion-item:hover { background: rgba(255, 255, 255, 0.2); }
@@ -161,6 +314,9 @@ HTML_DASHBOARD = '''
         .posicion-actions { display: flex; gap: 5px; }
         .btn-small { padding: 5px 10px; font-size: 0.8em; }
         .pulse { animation: pulse 2s infinite; }
+        .modo-velocidad-info { background: rgba(0, 0, 0, 0.3); padding: 10px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #ffbb33; }
+        .modo-velocidad-info h4 { margin-bottom: 5px; color: #ffbb33; }
+        .modo-item { display: flex; justify-content: space-between; margin: 3px 0; font-size: 0.9em; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
@@ -168,7 +324,7 @@ HTML_DASHBOARD = '''
     <div class="container">
         <div class="header">
             <h1>🤖 DASHBOARD CONTROL ROBOT 4DOF</h1>
-            <p>Control completo del robot colaborativo desde la web</p>
+            <p>Control completo del robot colaborativo desde la nube</p>
         </div>
 
         <div id="alert-container"></div>
@@ -179,8 +335,8 @@ HTML_DASHBOARD = '''
                 <h2>📊 Estado del Robot</h2>
                 
                 <div class="conexion-status">
-                    <div class="status-indicator status-connected" id="status-indicator"></div>
-                    <span id="conexion-text">Conectado vía Serial</span>
+                    <div class="status-indicator status-connecting" id="status-indicator"></div>
+                    <span id="conexion-text">Conectando al robot...</span>
                 </div>
                 
                 <div class="status-grid" id="estado-container">
@@ -200,6 +356,14 @@ HTML_DASHBOARD = '''
                         <div class="label">⚡ Velocidad</div>
                         <div class="value" id="velocidad-actual">Cargando...</div>
                     </div>
+                    <div class="status-item">
+                        <div class="label">📶 WiFi</div>
+                        <div class="value" id="wifi-status">Cargando...</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="label">🕒 Última Actualización</div>
+                        <div class="value" id="ultima-actualizacion">Cargando...</div>
+                    </div>
                 </div>
 
                 <div class="status-grid">
@@ -218,6 +382,27 @@ HTML_DASHBOARD = '''
                     <div class="status-item">
                         <div class="label">📍 M4 Posición</div>
                         <div class="value" id="posicion-m4">0°</div>
+                    </div>
+                </div>
+
+                <!-- Información de modos de velocidad -->
+                <div class="modo-velocidad-info">
+                    <h4>ℹ️ Modos de Velocidad</h4>
+                    <div class="modo-item">
+                        <span>M1, M2:</span>
+                        <span style="color: #00C851;">Control completo (1-1500 RPM)</span>
+                    </div>
+                    <div class="modo-item">
+                        <span>M3:</span>
+                        <span style="color: #ffbb33;">Velocidad fija 35 RPM</span>
+                    </div>
+                    <div class="modo-item">
+                        <span>M4:</span>
+                        <span style="color: #ffbb33;">Velocidad fija 1000 RPM</span>
+                    </div>
+                    <div class="modo-item">
+                        <span>Garra:</span>
+                        <span style="color: #00b4db;">100°=Abierto, 0°=Cerrado</span>
                     </div>
                 </div>
 
@@ -263,10 +448,10 @@ HTML_DASHBOARD = '''
                     <div class="input-group">
                         <label for="motor-select">Motor:</label>
                         <select id="motor-select">
-                            <option value="1">M1 - Motor 1</option>
-                            <option value="2">M2 - Motor 2</option>
-                            <option value="3">M3 - Motor 3</option>
-                            <option value="4">M4 - Motor 4</option>
+                            <option value="1">M1 - Control completo (1-1500 RPM)</option>
+                            <option value="2">M2 - Control completo (1-1500 RPM)</option>
+                            <option value="3">M3 - Velocidad fija 35 RPM</option>
+                            <option value="4">M4 - Velocidad fija 1000 RPM</option>
                         </select>
                     </div>
 
@@ -277,7 +462,7 @@ HTML_DASHBOARD = '''
 
                     <div class="input-group">
                         <label for="velocidad-input">Velocidad (RPM):</label>
-                        <input type="number" id="velocidad-input" value="500" min="1" max="1000">
+                        <input type="number" id="velocidad-input" value="500" min="1" max="1500">
                     </div>
 
                     <div class="btn-grid">
@@ -322,8 +507,8 @@ HTML_DASHBOARD = '''
                     </div>
 
                     <div class="input-group">
-                        <label for="velocidad-pos">Velocidad (RPM):</label>
-                        <input type="number" id="velocidad-pos" value="500" min="1" max="1000">
+                        <label for="velocidad-pos">Velocidad M1/M2 (1-1500 RPM):</label>
+                        <input type="number" id="velocidad-pos" value="500" min="1" max="1500">
                     </div>
 
                     <button class="btn" onclick="moverPosicion()" style="width: 100%; margin-top: 10px;">🧭 MOVER A POSICIÓN</button>
@@ -346,8 +531,9 @@ HTML_DASHBOARD = '''
     </div>
 
     <script>
-        let modoConexionActual = 'SERIAL';
+        let modoConexionActual = 'WIFI';
         let posicionesGuardadas = [];
+        let ultimoEstado = null;
 
         function showAlert(message, type = 'success') {
             const alertContainer = document.getElementById('alert-container');
@@ -404,19 +590,29 @@ HTML_DASHBOARD = '''
                 const estado = await response.json();
                 if (estado.error) {
                     document.getElementById('estado-container').innerHTML = `<div class="alert error">❌ ${estado.error}</div>`;
+                    actualizarIndicadorConexion(modoConexionActual, 'desconectado');
                     return;
                 }
+                
+                // Actualizar UI con estado
                 document.getElementById('motores-activos').textContent = estado.motores_activos ? 'ACTIVOS' : 'INACTIVOS';
                 document.getElementById('motores-activos').className = estado.motores_activos ? 'value active' : 'value';
                 document.getElementById('emergency-stop').textContent = estado.emergency_stop ? 'ACTIVADA' : 'NORMAL';
-                document.getElementById('garra-estado').textContent = estado.garra_abierta ? 'ABIERTA' : 'CERRADA';
+                document.getElementById('garra-estado').textContent = estado.garra_abierta ? 'ABIERTA (' + estado.garra_grados + '°)' : 'CERRADA (' + estado.garra_grados + '°)';
                 document.getElementById('velocidad-actual').textContent = estado.velocidad_actual + ' RPM';
+                document.getElementById('wifi-status').textContent = estado.conexion_wifi ? 'Conectado (' + estado.senal_wifi + ' dBm)' : 'Desconectado';
+                document.getElementById('wifi-status').className = estado.conexion_wifi ? 'value active' : 'value warning';
                 document.getElementById('posicion-m1').textContent = estado.posicion_m1 + '°';
                 document.getElementById('posicion-m2').textContent = estado.posicion_m2 + '°';
                 document.getElementById('posicion-m3').textContent = estado.posicion_m3 + '°';
                 document.getElementById('posicion-m4').textContent = estado.posicion_m4 + '°';
+                document.getElementById('ultima-actualizacion').textContent = new Date(estado.timestamp).toLocaleTimeString();
+                
+                actualizarIndicadorConexion(modoConexionActual, 'conectado');
+                
             } catch (error) {
                 console.error('Error actualizando estado:', error);
+                actualizarIndicadorConexion(modoConexionActual, 'desconectado');
             }
         }
 
@@ -446,7 +642,7 @@ HTML_DASHBOARD = '''
                 item.innerHTML = `
                     <div class="posicion-info">
                         <strong>${pos.nombre}</strong><br>
-                        <small>M1:${pos.posicion_m1}° M2:${pos.posicion_m2}° M3:${pos.posicion_m3}° M4:${pos.posicion_m4}°</small>
+                        <small>M1:${pos.posicion_m1}° M2:${pos.posicion_m2}° M3:${pos.posicion_m3}° M4:${pos.posicion_m4}° Vel:${pos.velocidad}RPM</small>
                     </div>
                     <div class="posicion-actions">
                         <button class="btn btn-small" onclick="cargarPosicion(${pos.id})">📥</button>
@@ -458,7 +654,8 @@ HTML_DASHBOARD = '''
         }
 
         function cargarPosicionActual() {
-            showAlert('📥 Valores actuales cargados en los campos');
+            // Esta función cargaría la posición actual del robot en los campos
+            showAlert('📥 Funcionalidad en desarrollo - Próximamente');
         }
 
         async function cargarPosicion(id) {
@@ -503,7 +700,8 @@ HTML_DASHBOARD = '''
                 const result = await response.json();
                 if (result.status === 'success') {
                     showAlert(`✅ Comando ${comando} enviado correctamente`);
-                    actualizarEstado();
+                    // Esperar un poco y actualizar estado
+                    setTimeout(actualizarEstado, 1000);
                 } else {
                     showAlert(`❌ Error: ${result.error}`, 'error');
                 }
@@ -538,7 +736,7 @@ HTML_DASHBOARD = '''
                 const result = await response.json();
                 if (result.status === 'success') {
                     showAlert(`✅ Motor M${motor} movido ${direccion === 'H' ? 'horario' : 'antihorario'}`);
-                    actualizarEstado();
+                    setTimeout(actualizarEstado, 2000);
                 } else {
                     showAlert(`❌ Error: ${result.error}`, 'error');
                 }
@@ -570,7 +768,7 @@ HTML_DASHBOARD = '''
                 const result = await response.json();
                 if (result.status === 'success') {
                     showAlert('✅ Movimiento a posición ejecutado');
-                    actualizarEstado();
+                    setTimeout(actualizarEstado, 3000);
                 } else {
                     showAlert(`❌ Error: ${result.error}`, 'error');
                 }
@@ -611,12 +809,14 @@ HTML_DASHBOARD = '''
             }
         }
 
+        // Actualizar estado cada 3 segundos
         setInterval(actualizarEstado, 3000);
         setInterval(cargarPosiciones, 5000);
+        
         document.addEventListener('DOMContentLoaded', function() {
             actualizarEstado();
             cargarPosiciones();
-            actualizarIndicadorConexion('SERIAL', 'conectado');
+            actualizarIndicadorConexion('WIFI', 'conectando');
         });
     </script>
 </body>
@@ -640,7 +840,7 @@ def enviar_comando(accion):
         
         cursor.execute(
             "INSERT INTO comandos_robot (esp32_id, comando) VALUES (%s, %s)",
-            ('CDBOT_001', accion.upper())
+            ('cobot_01', accion.upper())
         )
         conn.commit()
         cursor.close()
@@ -658,6 +858,9 @@ def cambiar_conexion():
         data = request.json
         modo = data.get('modo')
         
+        global SERIAL_MODE
+        SERIAL_MODE = (modo == 'SERIAL')
+        
         conn = get_db_connection()
         if conn is None:
             return jsonify({"status": "error", "error": "No database connection"}), 500
@@ -666,7 +869,7 @@ def cambiar_conexion():
         
         cursor.execute(
             "INSERT INTO comandos_robot (esp32_id, comando, modo_conexion) VALUES (%s, %s, %s)",
-            ('CDBOT_001', f'MODE:{modo}', modo)
+            ('cobot_01', f'MODE:{modo}', modo)
         )
         conn.commit()
         cursor.close()
@@ -697,7 +900,7 @@ def mover_motor():
             """INSERT INTO comandos_robot 
             (esp32_id, comando, motor_num, pasos, velocidad, direccion) 
             VALUES (%s, %s, %s, %s, %s, %s)""",
-            ('CDBOT_001', 'MOVER_MOTOR', motor, pasos, velocidad, direccion)
+            ('cobot_01', 'MOVER_MOTOR', motor, pasos, velocidad, direccion)
         )
         conn.commit()
         cursor.close()
@@ -729,7 +932,7 @@ def mover_posicion():
             """INSERT INTO comandos_robot 
             (esp32_id, comando, posicion_m1, posicion_m2, posicion_m3, posicion_m4, velocidad) 
             VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-            ('CDBOT_001', 'MOVIMIENTO_POSICION', 
+            ('cobot_01', 'MOVIMIENTO_POSICION', 
              posiciones[0], posiciones[1], posiciones[2], posiciones[3], velocidad)
         )
         conn.commit()
@@ -868,7 +1071,7 @@ def obtener_estado():
             
         cursor = conn.cursor()
         
-        cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'CDBOT_001' ORDER BY timestamp DESC LIMIT 1")
+        cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'cobot_01' ORDER BY timestamp DESC LIMIT 1")
         estado = cursor.fetchone()
         
         cursor.close()
@@ -883,7 +1086,11 @@ def obtener_estado():
                 "posicion_m3": float(estado[6]),
                 "posicion_m4": float(estado[7]),
                 "garra_abierta": bool(estado[8]),
-                "velocidad_actual": int(estado[9])
+                "garra_grados": float(estado[9]),
+                "velocidad_actual": int(estado[10]),
+                "conexion_wifi": bool(estado[11]),
+                "senal_wifi": int(estado[12]),
+                "timestamp": estado[13].isoformat() if estado[13] else datetime.now().isoformat()
             })
         else:
             return jsonify({"error": "No se encontró estado del robot"})
@@ -960,30 +1167,27 @@ def actualizar_estado():
             
         cursor = conn.cursor()
         
+        # Determinar estado de garra basado en grados
+        garra_grados = data.get('garra_deg', 100)
+        garra_abierta = garra_grados >= 50  # 100° = abierto, 0° = cerrado
+        
         cursor.execute('''
             INSERT INTO moduls_tellis 
-            (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta, velocidad_actual) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-            motores_activos = VALUES(motores_activos),
-            emergency_stop = VALUES(emergency_stop),
-            posicion_m1 = VALUES(posicion_m1),
-            posicion_m2 = VALUES(posicion_m2),
-            posicion_m3 = VALUES(posicion_m3),
-            posicion_m4 = VALUES(posicion_m4),
-            garra_abierta = VALUES(garra_abierta),
-            velocidad_actual = VALUES(velocidad_actual),
-            timestamp = CURRENT_TIMESTAMP
+            (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta, garra_grados, velocidad_actual, conexion_wifi, senal_wifi) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', (
-            data.get('esp32_id', 'CDBOT_001'),
+            data.get('esp32_id', 'cobot_01'),
             data.get('motors_active', False),
             data.get('emergency_stop', False),
             data.get('motor1_deg', 0),
             data.get('motor2_deg', 0), 
             data.get('motor3_deg', 0),
             data.get('motor4_deg', 0),
-            data.get('garra_state') == 'ABIERTA',
-            data.get('velocidad_actual', 500)
+            garra_abierta,
+            garra_grados,
+            data.get('velocidad_actual', 500),
+            data.get('connection_mode') == 'WIFI',
+            data.get('wifi_signal', 0)
         ))
         
         conn.commit()
@@ -1002,10 +1206,15 @@ def test_api():
     return jsonify({
         "status": "success", 
         "message": "✅ API funcionando correctamente",
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "modo_actual": "SERIAL" if SERIAL_MODE else "WIFI"
     })
 
 # ======================= INICIALIZACIÓN =======================
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
+    print(f"🚀 Iniciando servidor Flask en puerto {port}")
+    print(f"📡 IP del ESP32: {ESP32_IP}")
+    print(f"🔌 Puerto TCP: {TCP_PORT}")
+    print("✅ Dashboard disponible en: http://localhost:5000")
     app.run(host='0.0.0.0', port=port, debug=False)
