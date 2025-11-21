@@ -1,10 +1,12 @@
 from flask import Flask, jsonify, render_template_string, request
+from flask_cors import CORS
 import mysql.connector
 import os
 import time
 import traceback
 
 app = Flask(__name__)
+CORS(app)  # Añadir CORS para permitir requests del ESP32
 
 # ======================= CONEXIÓN MYSQL =======================
 def get_db_connection():
@@ -15,7 +17,8 @@ def get_db_connection():
             password=os.environ.get('MYSQL_PASSWORD', 'QttFmgSWJcoJfFKJNFwuscHPWPSESxWs'),
             database=os.environ.get('MYSQL_DATABASE', 'railway'),
             port=int(os.environ.get('MYSQL_PORT', 57488)),
-            connect_timeout=10
+            connect_timeout=10,
+            autocommit=True  # Añadir autocommit
         )
         return conn
     except Exception as e:
@@ -844,7 +847,7 @@ def obtener_posiciones():
         if conn is None:
             return jsonify({"status": "error", "error": "No database connection"}), 500
             
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
         
         cursor.execute("SELECT * FROM posiciones_guardadas ORDER BY nombre")
         posiciones = cursor.fetchall()
@@ -855,13 +858,13 @@ def obtener_posiciones():
         posiciones_list = []
         for pos in posiciones:
             posiciones_list.append({
-                "id": pos[0],
-                "nombre": pos[1],
-                "posicion_m1": float(pos[2]),
-                "posicion_m2": float(pos[3]),
-                "posicion_m3": float(pos[4]),
-                "posicion_m4": float(pos[5]),
-                "velocidad": int(pos[7])
+                "id": pos["id"],
+                "nombre": pos["nombre"],
+                "posicion_m1": float(pos["posicion_m1"]),
+                "posicion_m2": float(pos["posicion_m2"]),
+                "posicion_m3": float(pos["posicion_m3"]),
+                "posicion_m4": float(pos["posicion_m4"]),
+                "velocidad": int(pos["velocidad"]) if pos["velocidad"] else 500
             })
         
         return jsonify({"status": "success", "posiciones": posiciones_list})
@@ -877,7 +880,7 @@ def cargar_posicion(posicion_id):
         if conn is None:
             return jsonify({"status": "error", "error": "No database connection"}), 500
             
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
         
         cursor.execute("SELECT * FROM posiciones_guardadas WHERE id = %s", (posicion_id,))
         posicion = cursor.fetchone()
@@ -887,13 +890,13 @@ def cargar_posicion(posicion_id):
         
         if posicion:
             posicion_data = {
-                "id": posicion[0],
-                "nombre": posicion[1],
-                "posicion_m1": float(posicion[2]),
-                "posicion_m2": float(posicion[3]),
-                "posicion_m3": float(posicion[4]),
-                "posicion_m4": float(posicion[5]),
-                "velocidad": int(posicion[7])
+                "id": posicion["id"],
+                "nombre": posicion["nombre"],
+                "posicion_m1": float(posicion["posicion_m1"]),
+                "posicion_m2": float(posicion["posicion_m2"]),
+                "posicion_m3": float(posicion["posicion_m3"]),
+                "posicion_m4": float(posicion["posicion_m4"]),
+                "velocidad": int(posicion["velocidad"]) if posicion["velocidad"] else 500
             }
             return jsonify({"status": "success", "posicion": posicion_data})
         else:
@@ -931,7 +934,7 @@ def obtener_estado():
         if conn is None:
             return jsonify({"status": "error", "error": "No database connection"}), 500
             
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
         
         cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'cobot_01' ORDER BY timestamp DESC LIMIT 1")
         estado = cursor.fetchone()
@@ -941,14 +944,14 @@ def obtener_estado():
         
         if estado:
             return jsonify({
-                "motores_activos": bool(estado[2]),
-                "emergency_stop": bool(estado[3]), 
-                "posicion_m1": float(estado[4]),
-                "posicion_m2": float(estado[5]),
-                "posicion_m3": float(estado[6]),
-                "posicion_m4": float(estado[7]),
-                "garra_abierta": bool(estado[8]),
-                "velocidad_actual": int(estado[9])
+                "motores_activos": bool(estado["motores_activos"]),
+                "emergency_stop": bool(estado["emergency_stop"]), 
+                "posicion_m1": float(estado["posicion_m1"]),
+                "posicion_m2": float(estado["posicion_m2"]),
+                "posicion_m3": float(estado["posicion_m3"]),
+                "posicion_m4": float(estado["posicion_m4"]),
+                "garra_abierta": bool(estado["garra_abierta"]),
+                "velocidad_actual": int(estado["velocidad_actual"])
             })
         else:
             return jsonify({"error": "No se encontró estado del robot"})
@@ -957,15 +960,15 @@ def obtener_estado():
         return jsonify({"status": "error", "error": str(e)}), 500
 
 # ======================= RUTAS PARA COMUNICACIÓN CON ESP32 =======================
-@app.route('/api/comandos_pendientes/<esp32_id>')
+@app.route('/api/comandos_pendientes/<esp32_id>', methods=['GET'])
 def obtener_comandos_pendientes(esp32_id):
-    """Obtener comandos pendientes para un ESP32"""
+    """Obtener comandos pendientes para un ESP32 - CORREGIDO"""
     try:
         conn = get_db_connection()
         if conn is None:
             return jsonify({"status": "error", "error": "No database connection"}), 500
             
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
         
         # Obtener comandos no ejecutados
         cursor.execute(
@@ -977,22 +980,23 @@ def obtener_comandos_pendientes(esp32_id):
         comandos_list = []
         for cmd in comandos:
             comando_data = {
-                "id": cmd[0],
-                "comando": cmd[2],
-                "motor_num": cmd[4],
-                "pasos": cmd[5],
-                "velocidad": cmd[6],
-                "direccion": cmd[7],
-                "posicion_m1": cmd[8],
-                "posicion_m2": cmd[9],
-                "posicion_m3": cmd[10],
-                "posicion_m4": cmd[11]
+                "id": cmd["id"],
+                "comando": cmd["comando"],
+                "parametros": cmd["parametros"],
+                "motor_num": cmd["motor_num"],
+                "pasos": cmd["pasos"],
+                "velocidad": cmd["velocidad"],
+                "direccion": cmd["direccion"],
+                "posicion_m1": cmd["posicion_m1"],
+                "posicion_m2": cmd["posicion_m2"],
+                "posicion_m3": cmd["posicion_m3"],
+                "posicion_m4": cmd["posicion_m4"]
             }
             comandos_list.append(comando_data)
         
         # Marcar como ejecutados
         if comandos:
-            ids = [str(cmd[0]) for cmd in comandos]
+            ids = [str(cmd["id"]) for cmd in comandos]
             placeholders = ','.join(['%s'] * len(ids))
             cursor.execute(
                 f"UPDATE comandos_robot SET ejecutado = TRUE WHERE id IN ({placeholders})",
@@ -1003,7 +1007,7 @@ def obtener_comandos_pendientes(esp32_id):
         cursor.close()
         conn.close()
         
-        return jsonify({"status": "success", "comandos": comandos_list})
+        return jsonify({"status": "success", "comandos": comandos_list, "count": len(comandos_list)})
         
     except Exception as e:
         print(f"❌ Error en comandos_pendientes: {e}")
@@ -1067,4 +1071,3 @@ def test_api():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-    
