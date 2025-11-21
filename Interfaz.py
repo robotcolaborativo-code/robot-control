@@ -31,9 +31,18 @@ class CobotApp(ctk.CTk):
         self.connected = False
 
         # OPTIMIZACIÓN: Timing mejorado
-        self.command_delay = 0.01  # REDUCIDO: 0.02 → 0.01
-        self.move_delay = 0.4      # REDUCIDO: 0.6 → 0.4  
-        self.serial_timeout = 0.3  # REDUCIDO: 1.0 → 0.3
+        self.command_delay = 0.01
+        self.move_delay = 0.4
+        self.serial_timeout = 0.3
+
+        # ✅ INFORMACIÓN DE MODOS DE VELOCIDAD
+        self.modo_velocidad_info = {
+            "M1": "Control completo (1-1500 RPM)",
+            "M2": "Control completo (1-1500 RPM)", 
+            "M3": "Velocidad fija 35 RPM",
+            "M4": "Velocidad fija 1000 RPM",
+            "M5": "Garra (100°=Abierto, 0°=Cerrado)"
+        }
 
         # Posiciones (nombre -> {pos: [m1..m5], vel: v})
         self.positions = {}
@@ -151,6 +160,15 @@ class CobotApp(ctk.CTk):
         self.wifi_info_label = ctk.CTkLabel(left, text="📶 WiFi: Desconectado", text_color="red")
         self.wifi_info_label.pack(pady=4)
 
+        # ✅ NUEVO: Información de modos de velocidad
+        info_frame = ctk.CTkFrame(left)
+        info_frame.pack(pady=8, fill="x", padx=6)
+        ctk.CTkLabel(info_frame, text="ℹ️ Modos de Velocidad", font=("Arial", 16, "bold")).pack(pady=4)
+        for motor, info in self.modo_velocidad_info.items():
+            label_text = f"{motor}: {info}"
+            label_color = "#4CAF50" if motor in ["M1", "M2"] else "#FF9800" if motor in ["M3", "M4"] else "#2196F3"
+            ctk.CTkLabel(info_frame, text=label_text, text_color=label_color, font=("Arial", 12)).pack(anchor="w", pady=1)
+
         # Posiciones UI: M1..M4 con selector sentido, M5 garra como segmented button
         ctk.CTkLabel(left, text="📍 Posiciones (grados°)", font=("Arial", 25, "bold")).pack(pady=8)
 
@@ -159,7 +177,10 @@ class CobotApp(ctk.CTk):
         for i in range(4):
             f = ctk.CTkFrame(left)
             f.pack(fill="x", pady=2, padx=6)
-            ctk.CTkLabel(f, text=f"M{i+1}", width=30).pack(side="left")
+            motor_label = f"M{i+1}"
+            if i == 2: motor_label += " (35 RPM)"
+            elif i == 3: motor_label += " (1000 RPM)"
+            ctk.CTkLabel(f, text=motor_label, width=60).pack(side="left")
             e = ctk.CTkEntry(f, width=100)
             e.insert(0, "0")
             e.pack(side="left", padx=8)
@@ -170,15 +191,17 @@ class CobotApp(ctk.CTk):
             self.pos_entries.append(e)
             self.dir_vars.append(dir_var)
 
-        # Garra (M5) as segmented button (ABRIR/CERRAR)
+        # ✅ GARRA CORREGIDA: 100° = Abierto, 0° = Cerrado
         f_garra = ctk.CTkFrame(left)
         f_garra.pack(fill="x", pady=2, padx=6)
         ctk.CTkLabel(f_garra, text="M5 (Garra):", width=70).pack(side="left")
+        ctk.CTkLabel(f_garra, text="100°=Abierto, 0°=Cerrado", text_color="#2196F3", font=("Arial", 10)).pack(side="left", padx=5)
         self.garra_state_var = ctk.StringVar(value="ABRIR")
         self.garra_segment = ctk.CTkSegmentedButton(f_garra, values=["ABRIR", "CERRAR"], variable=self.garra_state_var)
         self.garra_segment.pack(side="left", padx=8)
 
-        ctk.CTkLabel(left, text="Velocidad (1-1000 RPM)").pack(pady=6)
+        # ✅ VELOCIDAD ACTUALIZADA: 1-1500 RPM para M1 y M2
+        ctk.CTkLabel(left, text="Velocidad M1/M2 (1-1500 RPM)").pack(pady=6)
         self.entry_vel = ctk.CTkEntry(left, width=120)
         self.entry_vel.insert(0, "500")
         self.entry_vel.pack(pady=6)
@@ -216,7 +239,8 @@ class CobotApp(ctk.CTk):
         self.entry_steps = ctk.CTkEntry(param_frame, width=100)
         self.entry_steps.insert(0, "200")
         self.entry_steps.grid(row=0, column=1, padx=6, pady=6)
-        ctk.CTkLabel(param_frame, text="Velocidad (1-1000 RPM)").grid(row=0, column=2, padx=6, pady=6)
+        # ✅ VELOCIDAD ACTUALIZADA: 1-1500 RPM
+        ctk.CTkLabel(param_frame, text="Velocidad M1/M2 (1-1500 RPM)").grid(row=0, column=2, padx=6, pady=6)
         self.entry_vel_direct = ctk.CTkEntry(param_frame, width=100)
         self.entry_vel_direct.insert(0, "500")
         self.entry_vel_direct.grid(row=0, column=3, padx=6, pady=6)
@@ -231,6 +255,12 @@ class CobotApp(ctk.CTk):
         ctk.CTkButton(f_direct, text="⟲ Antihorario", command=lambda: self.direct_move("A"),height=40).pack(side="left", padx=15)
         ctk.CTkButton(f_direct, text="⟳ Horario", command=lambda: self.direct_move("H"),height=40).pack(side="left", padx=15)
 
+        # ✅ NUEVO: Indicador de modo de velocidad para motor seleccionado
+        self.modo_velocidad_label = ctk.CTkLabel(f_direct, text="M1: Control completo (1-1500 RPM)", text_color="#4CAF50")
+        self.modo_velocidad_label.pack(side="left", padx=15)
+        
+        # Actualizar indicador cuando cambie el motor
+        self.direct_motor_var.trace('w', self.actualizar_indicador_velocidad)
 
         # Botones generales: ON/OFF/ABRIR/CERRAR
         f_g = ctk.CTkFrame(right)
@@ -263,6 +293,18 @@ class CobotApp(ctk.CTk):
         self.text_terminal = ctk.CTkTextbox(self.terminal_frame, height=300)
         self.text_terminal.pack(fill="both", expand=True, padx=8, pady=6)
         self.text_terminal.insert("end", "Terminal lista...\n")
+
+    # ✅ NUEVA FUNCIÓN: Actualizar indicador de modo de velocidad
+    def actualizar_indicador_velocidad(self, *args):
+        motor = self.direct_motor_var.get()
+        info = self.modo_velocidad_info.get(motor, "")
+        colors = {
+            "M1": "#4CAF50", "M2": "#4CAF50",  # Verde para control completo
+            "M3": "#FF9800", "M4": "#FF9800",  # Naranja para velocidad fija
+            "M5": "#2196F3"                    # Azul para garra
+        }
+        color = colors.get(motor, "white")
+        self.modo_velocidad_label.configure(text=f"{motor}: {info}", text_color=color)
 
     # ------------------- NUEVAS FUNCIONES WIFI OPTIMIZADAS -------------------
     def update_wifi_info(self):
@@ -331,11 +373,10 @@ class CobotApp(ctk.CTk):
                 self.log("⚠️ No hay puerto serial disponible.")
                 return
             
-            # OPTIMIZACIÓN: Serial con timeout reducido
             self.serial_port = serial.Serial(
                 puerto, 
                 115200, 
-                timeout=self.serial_timeout,  # REDUCIDO: 1.0 → 0.3
+                timeout=self.serial_timeout,
                 write_timeout=1.0
             )
             self.connected = True
@@ -343,14 +384,13 @@ class CobotApp(ctk.CTk):
             self.log(f"🔌 Conectado a {puerto} (Serial).")
             self.stop_thread = False
             
-            # OPTIMIZACIÓN: Thread de lectura más rápido
             threading.Thread(target=self.read_serial_fast, daemon=True).start()
 
             try:
                 if self.serial_port and self.serial_port.is_open:
                     self.serial_port.write(b"MODE:SERIAL\n")
                     self.log("➡ Enviado MODE:SERIAL al ESP")
-                    time.sleep(0.1)  # REDUCIDO: 0.2 → 0.1
+                    time.sleep(0.1)
             except Exception as e:
                 self.log(f"⚠️ No se pudo enviar MODE:SERIAL: {e}")
 
@@ -363,25 +403,22 @@ class CobotApp(ctk.CTk):
             ip = self.entry_ip.get()
             port = int(self.entry_port.get())
 
-            # OPTIMIZACIÓN: Tiempo de espera reducido
             try:
                 if self.serial_port and self.serial_port.is_open:
                     self.serial_port.write(b"MODE:WIFI\n")
                     self.log("➡ Enviado MODE:WIFI al ESP")
-                    time.sleep(0.5)  # REDUCIDO: 1.0 → 0.5
+                    time.sleep(0.5)
             except Exception as e:
                 self.log(f"⚠️ No se pudo enviar MODE:WIFI: {e}")
 
-            # OPTIMIZACIÓN: Socket con timeout reducido
             self.tcp_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.tcp_client.settimeout(4)  # REDUCIDO: 6 → 4 segundos
+            self.tcp_client.settimeout(4)
             self.tcp_client.connect((ip, port))
             self.connected = True
             self.label_status.configure(text=f"Conectado (Wi-Fi {ip}:{port})", text_color="green")
             self.log(f"🌐 Conectado a {ip}:{port} (Wi-Fi).")
             self.stop_thread = False
             
-            # OPTIMIZACIÓN: Thread de lectura más rápido
             threading.Thread(target=self.read_wifi_fast, daemon=True).start()
             self.update_wifi_info()
             
@@ -395,7 +432,7 @@ class CobotApp(ctk.CTk):
                 try:
                     self.serial_port.write(b"MODE:SERIAL\n")
                     self.log("➡ Enviado MODE:SERIAL al ESP antes de cerrar puerto.")
-                    time.sleep(0.05)  # REDUCIDO: 0.1 → 0.05
+                    time.sleep(0.05)
                 except Exception:
                     pass
                 self.serial_port.close()
@@ -415,17 +452,13 @@ class CobotApp(ctk.CTk):
         self.log("🔴 Desconectado.")
 
     # ------------------- LECTURA OPTIMIZADA -------------------
-    
-    # OPTIMIZACIÓN: Lectura serial más rápida
     def read_serial_fast(self):
         buffer = ""
         while not self.stop_thread and self.serial_port and self.serial_port.is_open:
             try:
-                # Leer todo lo disponible de una vez - MÁS RÁPIDO
                 data = self.serial_port.read(self.serial_port.in_waiting or 1).decode(errors='ignore')
                 if data:
                     buffer += data
-                    # Procesar líneas completas inmediatamente
                     while '\n' in buffer:
                         line, buffer = buffer.split('\n', 1)
                         line = line.strip()
@@ -436,16 +469,13 @@ class CobotApp(ctk.CTk):
             except Exception:
                 break
 
-    # OPTIMIZACIÓN: Lectura WiFi más rápida  
     def read_wifi_fast(self):
         buffer = ""
         while not self.stop_thread and self.tcp_client:
             try:
-                # Recibir chunks más pequeños para respuesta más rápida
                 data = self.tcp_client.recv(512).decode(errors='ignore')
                 if data:
                     buffer += data
-                    # Procesar líneas completas inmediatamente
                     while '\n' in buffer:
                         line, buffer = buffer.split('\n', 1)
                         line = line.strip()
@@ -461,7 +491,7 @@ class CobotApp(ctk.CTk):
     # ------------------- ENVÍO OPTIMIZADO -------------------
     def send_command(self, cmd, pause=None):
         if pause is None:
-            pause = self.command_delay  # Usar delay optimizado
+            pause = self.command_delay
             
         try:
             with self.lock:
@@ -482,13 +512,12 @@ class CobotApp(ctk.CTk):
                     else:
                         self.log("⚠️ No conectado por Serial ni Wi-Fi.")
                         return False
-                else:  # modo Wi-Fi
+                else:
                     if self.tcp_client:
                         try:
                             self.tcp_client.sendall((cmd + "\n").encode())
                             success = True
                         except Exception as e:
-                            # try serial as fallback
                             if self.serial_port and self.serial_port.is_open:
                                 self.serial_port.write((cmd + "\n").encode())
                                 success = True
@@ -520,11 +549,15 @@ class CobotApp(ctk.CTk):
         vel = self.entry_vel_direct.get()
         try:
             pasos_i = int(pasos)
-            vel_i = int(vel)
-            vel_i = max(1, min(1000, vel_i))
+            # ✅ VALIDACIÓN MEJORADA DE VELOCIDAD
+            if motor in ["M1", "M2"]:
+                vel_i = max(1, min(1500, int(vel)))  # 1-1500 RPM para M1 y M2
+            else:
+                vel_i = int(vel)  # Para M3 y M4 se ignora (pero se envía)
         except:
             self.log("⚠️ Pasos/vel inválidos.")
             return
+            
         if motor == "M5":
             estado = self.garra_state_var.get()
             if estado not in ["ABRIR", "CERRAR"]:
@@ -534,6 +567,11 @@ class CobotApp(ctk.CTk):
             dir_char = "H" if direction == "H" else "A"
             cmd = f"{motor},{dir_char},{pasos_i},{vel_i}"
             self.send_command(cmd)
+            # ✅ INFORMAR MODO DE VELOCIDAD APLICADO
+            if motor == "M3":
+                self.log(f"ℹ️ M3: Velocidad fija 35 RPM (solicitado: {vel_i} RPM)")
+            elif motor == "M4":
+                self.log(f"ℹ️ M4: Velocidad fija 1000 RPM (solicitado: {vel_i} RPM)")
 
     # ------------------- Posiciones (guardar / cargar / eliminar) ----
     def load_positions_file(self):
@@ -572,8 +610,9 @@ class CobotApp(ctk.CTk):
             if garra_state not in ["ABRIR", "CERRAR"]:
                 garra_state = "ABRIR"
             vals.append(garra_state)
+            # ✅ VALIDACIÓN VELOCIDAD M1/M2
             vel = int(self.entry_vel.get())
-            vel = max(1, min(1000, vel))
+            vel = max(1, min(1500, vel))
         except Exception:
             self.log("⚠️ Valores inválidos al guardar posición.")
             return
@@ -608,7 +647,6 @@ class CobotApp(ctk.CTk):
         t = threading.Thread(target=self.move_to_position_fast, daemon=True)
         t.start()
 
-    # OPTIMIZACIÓN: Movimiento secuencial más rápido
     def move_to_position_fast(self):
         key = self.pos_menu.get()
         if key not in self.positions:
@@ -620,7 +658,6 @@ class CobotApp(ctk.CTk):
         total_steps = 5
         step_idx = 0
         
-        # OPTIMIZACIÓN: Movimiento más rápido con delays reducidos
         for i in range(4):
             motor_id = i + 1
             val = pos[i]
@@ -637,17 +674,24 @@ class CobotApp(ctk.CTk):
             dir_choice = self.dir_vars[i].get() if i < len(self.dir_vars) else "H"
             cmd = f"M{motor_id},{dir_choice},{pasos},{vel}"
             
-            ok = self.send_command(cmd, pause=0.03)  # REDUCIDO: 0.05 → 0.03
+            ok = self.send_command(cmd, pause=0.03)
             if not ok:
                 self.log("⚠️ No se pudo enviar comando. Abortando secuencia.")
                 return
                 
-            self.log(f"Motor {motor_id} movido (grados={vnum}, vel={vel})")
+            # ✅ INFORMAR MODO DE VELOCIDAD
+            if motor_id == 3:
+                self.log(f"Motor {motor_id} movido (grados={vnum}) - MODO: 35 RPM FIJO")
+            elif motor_id == 4:
+                self.log(f"Motor {motor_id} movido (grados={vnum}) - MODO: 1000 RPM FIJO")
+            else:
+                self.log(f"Motor {motor_id} movido (grados={vnum}, vel={vel})")
+                
             step_idx += 1
             self.progress.set(step_idx / total_steps)
-            time.sleep(self.move_delay)  # REDUCIDO: 0.6 → 0.4
+            time.sleep(self.move_delay)
 
-        # Garra (M5) — más rápido
+        # ✅ GARRA CORREGIDA
         gval = pos[4]
         if isinstance(gval, str):
             gcmd = gval.upper()
@@ -656,18 +700,18 @@ class CobotApp(ctk.CTk):
         else:
             try:
                 gnum = float(gval)
-                gcmd = "CERRAR" if gnum >= 180 else "ABRIR"
+                gcmd = "CERRAR" if gnum < 50 else "ABRIR"  # Umbral a 50°
             except:
                 gcmd = "ABRIR"
                 
-        ok = self.send_command(gcmd, pause=0.03)  # REDUCIDO
+        ok = self.send_command(gcmd, pause=0.03)
         if not ok:
             self.log("⚠️ Error al enviar comando garra.")
             return
             
         step_idx += 1
         self.progress.set(step_idx / total_steps)
-        time.sleep(self.move_delay)  # REDUCIDO
+        time.sleep(self.move_delay)
 
         self.log("✅ Movimiento secuencial completado.")
         self.progress.set(0.0)
