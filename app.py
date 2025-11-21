@@ -85,13 +85,13 @@ def setup_database():
         ''')
         
         # Insertar estado inicial si no existe
-        cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'CDBOT_001'")
+        cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'cobot_01'")
         if not cursor.fetchone():
             cursor.execute('''
                 INSERT INTO moduls_tellis 
                 (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta, velocidad_actual) 
                 VALUES 
-                ('CDBOT_001', 1, 0, 0, 0, 0, 0, 1, 500)
+                ('cobot_01', 0, 0, 0, 0, 0, 0, 1, 500)
             ''')
         
         conn.commit()
@@ -107,7 +107,7 @@ def setup_database():
 # Configurar base de datos al inicio
 setup_database()
 
-# ======================= HTML DASHBOARD COMPLETO =======================
+# ======================= HTML DASHBOARD ACTUALIZADO =======================
 HTML_DASHBOARD = '''
 <!DOCTYPE html>
 <html>
@@ -161,6 +161,7 @@ HTML_DASHBOARD = '''
         .posicion-actions { display: flex; gap: 5px; }
         .btn-small { padding: 5px 10px; font-size: 0.8em; }
         .pulse { animation: pulse 2s infinite; }
+        .velocidad-info { background: rgba(255, 193, 7, 0.2); border: 1px solid #ffc107; padding: 10px; border-radius: 5px; margin: 10px 0; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
@@ -221,6 +222,14 @@ HTML_DASHBOARD = '''
                     </div>
                 </div>
 
+                <!-- INFORMACIÓN DE VELOCIDADES PREDEFINIDAS -->
+                <div class="velocidad-info">
+                    <h4>⚡ Configuración de Velocidades</h4>
+                    <p><strong>M3:</strong> Velocidad fija 35 RPM</p>
+                    <p><strong>M4:</strong> Velocidad fija 1000 RPM</p>
+                    <p><strong>M1 y M2:</strong> Control variable (1-1500 RPM)</p>
+                </div>
+
                 <div class="control-group">
                     <h3>🔌 Configuración de Conexión</h3>
                     <div class="btn-grid">
@@ -250,6 +259,7 @@ HTML_DASHBOARD = '''
                 <div class="animation-container">
                     <div class="robot-visual pulse">🤖</div>
                     <p style="margin-top: 15px; opacity: 0.8;">Robot 4DOF + Garra</p>
+                    <p style="opacity: 0.7; font-size: 0.9em;">Actualización en tiempo real</p>
                 </div>
             </div>
 
@@ -263,10 +273,10 @@ HTML_DASHBOARD = '''
                     <div class="input-group">
                         <label for="motor-select">Motor:</label>
                         <select id="motor-select">
-                            <option value="1">M1 - Motor 1</option>
-                            <option value="2">M2 - Motor 2</option>
-                            <option value="3">M3 - Motor 3</option>
-                            <option value="4">M4 - Motor 4</option>
+                            <option value="1">M1 - Motor 1 (Vel: 1-1500)</option>
+                            <option value="2">M2 - Motor 2 (Vel: 1-1500)</option>
+                            <option value="3">M3 - Motor 3 (Vel: Fija 35)</option>
+                            <option value="4">M4 - Motor 4 (Vel: Fija 1000)</option>
                         </select>
                     </div>
 
@@ -277,7 +287,7 @@ HTML_DASHBOARD = '''
 
                     <div class="input-group">
                         <label for="velocidad-input">Velocidad (RPM):</label>
-                        <input type="number" id="velocidad-input" value="500" min="1" max="1000">
+                        <input type="number" id="velocidad-input" value="500" min="1" max="1500">
                     </div>
 
                     <div class="btn-grid">
@@ -290,7 +300,7 @@ HTML_DASHBOARD = '''
                     <h3>🎯 Control por Posición</h3>
                     
                     <div class="motor-control">
-                        <h4>Motor 1 (M1)</h4>
+                        <h4>Motor 1 (M1) - Velocidad variable</h4>
                         <div class="input-group">
                             <label>Posición (0-360°):</label>
                             <input type="number" id="pos-m1" value="0" min="0" max="360" step="1">
@@ -298,7 +308,7 @@ HTML_DASHBOARD = '''
                     </div>
 
                     <div class="motor-control">
-                        <h4>Motor 2 (M2)</h4>
+                        <h4>Motor 2 (M2) - Velocidad variable</h4>
                         <div class="input-group">
                             <label>Posición (0-360°):</label>
                             <input type="number" id="pos-m2" value="0" min="0" max="360" step="1">
@@ -306,7 +316,7 @@ HTML_DASHBOARD = '''
                     </div>
 
                     <div class="motor-control">
-                        <h4>Motor 3 (M3)</h4>
+                        <h4>Motor 3 (M3) - Velocidad fija 35</h4>
                         <div class="input-group">
                             <label>Posición (0-360°):</label>
                             <input type="number" id="pos-m3" value="0" min="0" max="360" step="1">
@@ -314,7 +324,7 @@ HTML_DASHBOARD = '''
                     </div>
 
                     <div class="motor-control">
-                        <h4>Motor 4 (M4)</h4>
+                        <h4>Motor 4 (M4) - Velocidad fija 1000</h4>
                         <div class="input-group">
                             <label>Posición (0-360°):</label>
                             <input type="number" id="pos-m4" value="0" min="0" max="360" step="1">
@@ -322,8 +332,8 @@ HTML_DASHBOARD = '''
                     </div>
 
                     <div class="input-group">
-                        <label for="velocidad-pos">Velocidad (RPM):</label>
-                        <input type="number" id="velocidad-pos" value="500" min="1" max="1000">
+                        <label for="velocidad-pos">Velocidad M1/M2 (RPM):</label>
+                        <input type="number" id="velocidad-pos" value="500" min="1" max="1500">
                     </div>
 
                     <button class="btn" onclick="moverPosicion()" style="width: 100%; margin-top: 10px;">🧭 MOVER A POSICIÓN</button>
@@ -348,6 +358,7 @@ HTML_DASHBOARD = '''
     <script>
         let modoConexionActual = 'SERIAL';
         let posicionesGuardadas = [];
+        let ultimaActualizacion = null;
 
         function showAlert(message, type = 'success') {
             const alertContainer = document.getElementById('alert-container');
@@ -373,6 +384,13 @@ HTML_DASHBOARD = '''
                 indicator.className = 'status-indicator status-disconnected';
                 text.textContent = 'Desconectado';
             }
+        }
+
+        function actualizarTiempoUltimaActualizacion() {
+            const ahora = new Date();
+            ultimaActualizacion = ahora;
+            document.getElementById('conexion-text').textContent = 
+                `Conectado vía ${modoConexionActual} | Última actualización: ${ahora.toLocaleTimeString()}`;
         }
 
         async function cambiarModoConexion(modo) {
@@ -406,17 +424,42 @@ HTML_DASHBOARD = '''
                     document.getElementById('estado-container').innerHTML = `<div class="alert error">❌ ${estado.error}</div>`;
                     return;
                 }
+                
+                // Actualizar estado general
                 document.getElementById('motores-activos').textContent = estado.motores_activos ? 'ACTIVOS' : 'INACTIVOS';
                 document.getElementById('motores-activos').className = estado.motores_activos ? 'value active' : 'value';
                 document.getElementById('emergency-stop').textContent = estado.emergency_stop ? 'ACTIVADA' : 'NORMAL';
                 document.getElementById('garra-estado').textContent = estado.garra_abierta ? 'ABIERTA' : 'CERRADA';
                 document.getElementById('velocidad-actual').textContent = estado.velocidad_actual + ' RPM';
-                document.getElementById('posicion-m1').textContent = estado.posicion_m1 + '°';
-                document.getElementById('posicion-m2').textContent = estado.posicion_m2 + '°';
-                document.getElementById('posicion-m3').textContent = estado.posicion_m3 + '°';
-                document.getElementById('posicion-m4').textContent = estado.posicion_m4 + '°';
+                
+                // Actualizar posiciones con animación
+                actualizarPosicionConAnimacion('posicion-m1', estado.posicion_m1);
+                actualizarPosicionConAnimacion('posicion-m2', estado.posicion_m2);
+                actualizarPosicionConAnimacion('posicion-m3', estado.posicion_m3);
+                actualizarPosicionConAnimacion('posicion-m4', estado.posicion_m4);
+                
+                actualizarTiempoUltimaActualizacion();
+                
             } catch (error) {
                 console.error('Error actualizando estado:', error);
+                document.getElementById('conexion-text').textContent = 'Error de conexión con el servidor';
+            }
+        }
+
+        function actualizarPosicionConAnimacion(elementId, nuevoValor) {
+            const elemento = document.getElementById(elementId);
+            const valorActual = parseFloat(elemento.textContent) || 0;
+            const diferencia = Math.abs(nuevoValor - valorActual);
+            
+            if (diferencia > 0.1) { // Solo animar si hay cambio significativo
+                elemento.style.color = '#ffc107'; // Amarillo durante cambio
+                elemento.textContent = nuevoValor.toFixed(1) + '°';
+                
+                setTimeout(() => {
+                    elemento.style.color = '#00b4db'; // Volver al color original
+                }, 1000);
+            } else {
+                elemento.textContent = nuevoValor.toFixed(1) + '°';
             }
         }
 
@@ -503,7 +546,8 @@ HTML_DASHBOARD = '''
                 const result = await response.json();
                 if (result.status === 'success') {
                     showAlert(`✅ Comando ${comando} enviado correctamente`);
-                    actualizarEstado();
+                    // Actualizar estado inmediatamente después del comando
+                    setTimeout(actualizarEstado, 1000);
                 } else {
                     showAlert(`❌ Error: ${result.error}`, 'error');
                 }
@@ -520,10 +564,22 @@ HTML_DASHBOARD = '''
             const motor = document.getElementById('motor-select').value;
             const pasos = document.getElementById('pasos-input').value;
             const velocidad = document.getElementById('velocidad-input').value;
+            
             if (!pasos || pasos < 1) {
                 showAlert('⚠️ Ingresa un número válido de pasos', 'warning');
                 return;
             }
+            
+            // Mostrar información de velocidad según el motor
+            const motorInfo = {
+                '3': 'M3 usa velocidad fija 35 RPM',
+                '4': 'M4 usa velocidad fija 1000 RPM'
+            };
+            
+            if (motorInfo[motor]) {
+                showAlert(`ℹ️ ${motorInfo[motor]}`, 'warning');
+            }
+            
             try {
                 const response = await fetch('/api/mover_motor', {
                     method: 'POST',
@@ -538,7 +594,8 @@ HTML_DASHBOARD = '''
                 const result = await response.json();
                 if (result.status === 'success') {
                     showAlert(`✅ Motor M${motor} movido ${direccion === 'H' ? 'horario' : 'antihorario'}`);
-                    actualizarEstado();
+                    // Actualizar estado después del movimiento
+                    setTimeout(actualizarEstado, 1500);
                 } else {
                     showAlert(`❌ Error: ${result.error}`, 'error');
                 }
@@ -555,12 +612,16 @@ HTML_DASHBOARD = '''
                 parseFloat(document.getElementById('pos-m4').value)
             ];
             const velocidad = parseInt(document.getElementById('velocidad-pos').value);
+            
             for (let i = 0; i < posiciones.length; i++) {
                 if (posiciones[i] < 0 || posiciones[i] > 360) {
                     showAlert(`⚠️ Posición M${i+1} fuera de rango (0-360°)`, 'warning');
                     return;
                 }
             }
+            
+            showAlert('🔄 Ejecutando movimiento secuencial...', 'warning');
+            
             try {
                 const response = await fetch('/api/mover_posicion', {
                     method: 'POST',
@@ -570,7 +631,8 @@ HTML_DASHBOARD = '''
                 const result = await response.json();
                 if (result.status === 'success') {
                     showAlert('✅ Movimiento a posición ejecutado');
-                    actualizarEstado();
+                    // Actualizar estado después del movimiento completo
+                    setTimeout(actualizarEstado, 3000);
                 } else {
                     showAlert(`❌ Error: ${result.error}`, 'error');
                 }
@@ -611,12 +673,15 @@ HTML_DASHBOARD = '''
             }
         }
 
-        setInterval(actualizarEstado, 3000);
-        setInterval(cargarPosiciones, 5000);
+        // Actualización más frecuente para mejor tiempo real
+        setInterval(actualizarEstado, 2000); // Cada 2 segundos
+        setInterval(cargarPosiciones, 10000); // Cada 10 segundos
+        
         document.addEventListener('DOMContentLoaded', function() {
             actualizarEstado();
             cargarPosiciones();
             actualizarIndicadorConexion('SERIAL', 'conectado');
+            actualizarTiempoUltimaActualizacion();
         });
     </script>
 </body>
@@ -640,7 +705,7 @@ def enviar_comando(accion):
         
         cursor.execute(
             "INSERT INTO comandos_robot (esp32_id, comando) VALUES (%s, %s)",
-            ('CDBOT_001', accion.upper())
+            ('cobot_01', accion.upper())
         )
         conn.commit()
         cursor.close()
@@ -666,7 +731,7 @@ def cambiar_conexion():
         
         cursor.execute(
             "INSERT INTO comandos_robot (esp32_id, comando, modo_conexion) VALUES (%s, %s, %s)",
-            ('CDBOT_001', f'MODE:{modo}', modo)
+            ('cobot_01', f'MODE:{modo}', modo)
         )
         conn.commit()
         cursor.close()
@@ -697,7 +762,7 @@ def mover_motor():
             """INSERT INTO comandos_robot 
             (esp32_id, comando, motor_num, pasos, velocidad, direccion) 
             VALUES (%s, %s, %s, %s, %s, %s)""",
-            ('CDBOT_001', 'MOVER_MOTOR', motor, pasos, velocidad, direccion)
+            ('cobot_01', 'MOVER_MOTOR', motor, pasos, velocidad, direccion)
         )
         conn.commit()
         cursor.close()
@@ -729,7 +794,7 @@ def mover_posicion():
             """INSERT INTO comandos_robot 
             (esp32_id, comando, posicion_m1, posicion_m2, posicion_m3, posicion_m4, velocidad) 
             VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-            ('CDBOT_001', 'MOVIMIENTO_POSICION', 
+            ('cobot_01', 'MOVIMIENTO_POSICION', 
              posiciones[0], posiciones[1], posiciones[2], posiciones[3], velocidad)
         )
         conn.commit()
@@ -868,7 +933,7 @@ def obtener_estado():
             
         cursor = conn.cursor()
         
-        cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'CDBOT_001' ORDER BY timestamp DESC LIMIT 1")
+        cursor.execute("SELECT * FROM moduls_tellis WHERE esp32_id = 'cobot_01' ORDER BY timestamp DESC LIMIT 1")
         estado = cursor.fetchone()
         
         cursor.close()
@@ -944,7 +1009,7 @@ def obtener_comandos_pendientes(esp32_id):
         print(f"❌ Error en comandos_pendientes: {e}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
-@app.route('/api/actualizar_estado', methods=['POST'])
+@app.route('/api/status/update', methods=['POST'])
 def actualizar_estado():
     """Actualizar estado del robot desde el ESP32"""
     try:
@@ -960,29 +1025,22 @@ def actualizar_estado():
             
         cursor = conn.cursor()
         
+        # Determinar estado de la garra
+        garra_abierta = data.get('garra_state') == 'ABIERTA'
+        
         cursor.execute('''
             INSERT INTO moduls_tellis 
             (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta, velocidad_actual) 
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-            motores_activos = VALUES(motores_activos),
-            emergency_stop = VALUES(emergency_stop),
-            posicion_m1 = VALUES(posicion_m1),
-            posicion_m2 = VALUES(posicion_m2),
-            posicion_m3 = VALUES(posicion_m3),
-            posicion_m4 = VALUES(posicion_m4),
-            garra_abierta = VALUES(garra_abierta),
-            velocidad_actual = VALUES(velocidad_actual),
-            timestamp = CURRENT_TIMESTAMP
         ''', (
-            data.get('esp32_id', 'CDBOT_001'),
+            data.get('esp32_id', 'cobot_01'),
             data.get('motors_active', False),
             data.get('emergency_stop', False),
             data.get('motor1_deg', 0),
             data.get('motor2_deg', 0), 
             data.get('motor3_deg', 0),
             data.get('motor4_deg', 0),
-            data.get('garra_state') == 'ABIERTA',
+            garra_abierta,
             data.get('velocidad_actual', 500)
         ))
         
@@ -1009,3 +1067,4 @@ def test_api():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+    
