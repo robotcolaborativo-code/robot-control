@@ -13,7 +13,7 @@ app = Flask(__name__)
 CORS(app)
 
 # ======================= CONFIGURACIÓN =======================
-ESP32_IP = "10.31.183.131"  # IP del ESP32
+ESP32_IP = "10.31.183.131"  # IP deel ESP32
 TCP_PORT = 8080
 SERIAL_MODE = False  # Por defecto usamos WiFi
 
