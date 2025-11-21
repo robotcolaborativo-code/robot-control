@@ -24,8 +24,9 @@ int dirPins[4]  = {14, 25, 32, 19};
 
 Servo garra;
 int pinServo = 23;
-int posAbierta = 0;
-int posCerrada = 180;
+// ✅ GARRA CORREGIDA: 100° = Abierto, 0° = Cerrado
+int posAbierta = 100;
+int posCerrada = 0;
 
 // ======================= ESTADO =======================
 WiFiServer server(TCP_PORT_DEFAULT);
@@ -47,14 +48,18 @@ bool motoresActivos = false;
 bool emergencyStop = false;
 float current_deg[5] = {0,0,0,0,0};
 
+// ✅ MODOS DE VELOCIDAD FIJOS
+const int VELOCIDAD_M3_FIJA = 35;    // 35 RPM para M3
+const int VELOCIDAD_M4_FIJA = 1000;  // 1000 RPM para M4
+
 // TIMING OPTIMIZADO - MÁS RÁPIDO
 bool ledState = LOW;
 unsigned long ledLastToggle = 0;
-const unsigned long LED_BLINK_MS = 300; // REDUCIDO
+const unsigned long LED_BLINK_MS = 300;
 unsigned long lastWifiCheck = 0;
-const unsigned long WIFI_CHECK_INTERVAL = 20000; // 20s en vez de 10s
+const unsigned long WIFI_CHECK_INTERVAL = 20000;
 unsigned long lastCloudUpdate = 0;
-const unsigned long CLOUD_UPDATE_INTERVAL = 25000; // 25s en vez de 15s
+const unsigned long CLOUD_UPDATE_INTERVAL = 25000;
 unsigned long lastCommandTime = 0;
 bool commandInProgress = false;
 
@@ -77,10 +82,13 @@ String generarJSONEstado();
 void procesarComandosRapido();
 void procesarComandoRapido(String cmd);
 
+// ✅ NUEVA FUNCIÓN: Aplicar modo de velocidad según motor
+int aplicarModoVelocidad(int motor, int velocidad_solicitada);
+
 // ======================= SETUP =======================
 void setup() {
   Serial.begin(115200);
-  Serial.setTimeout(10); // OPTIMIZACIÓN: Reducido de 1000ms a 10ms!
+  Serial.setTimeout(10);
   delay(200);
   Serial.println("\n🔧 Iniciando ESP32 Cobot...");
   Serial.println("🤖 ESP32 listo...");
@@ -114,33 +122,38 @@ void setup() {
 
 // ======================= LOOP OPTIMIZADO =======================
 void loop() {
-  // OPTIMIZACIÓN: Procesar comandos PRIMERO y más rápido
   procesarComandosRapido();
   
   mantener_wifi();
   verificarConexionWiFi();
   update_wifi_led();
 
-  // Envío de datos a la nube (solo si no hay comandos en progreso)
   if (!commandInProgress && wifi_status == WIFI_CONNECTED && millis() - lastCloudUpdate > CLOUD_UPDATE_INTERVAL) {
     enviarEstadoALaNube();
     lastCloudUpdate = millis();
   }
 
-  // OPTIMIZACIÓN: Delay reducido
   delay(1);
 }
 
-// ======================= NUEVAS FUNCIONES OPTIMIZADAS =======================
+// ✅ NUEVA FUNCIÓN: Aplicar modos de velocidad
+int aplicarModoVelocidad(int motor, int velocidad_solicitada) {
+  switch(motor) {
+    case 2: // M3 (0-indexed)
+      return VELOCIDAD_M3_FIJA; // 35 RPM fijo
+    case 3: // M4 (0-indexed)  
+      return VELOCIDAD_M4_FIJA; // 1000 RPM fijo
+    default: // M1 y M2 - control completo 1-1500 RPM
+      return constrain(velocidad_solicitada, 1, 1500);
+  }
+}
 
-// OPTIMIZACIÓN: Procesamiento de comandos MÁS RÁPIDO
+// ======================= NUEVAS FUNCIONES OPTIMIZADAS =======================
 void procesarComandosRapido() {
-  // Leer todo el buffer serial disponible de una vez
   while (Serial.available()) {
     char c = (char)Serial.read();
     inputString += c;
     
-    // Procesar inmediatamente si tenemos comando completo
     if (c == '\n' || c == '\r') {
       String line = inputString;
       line.trim();
@@ -151,7 +164,6 @@ void procesarComandosRapido() {
     }
   }
   
-  // OPTIMIZACIÓN: Procesar comandos TCP también rápidos
   if (wifi_server_running) {
     if (!clientTCP || !clientTCP.connected()) {
       WiFiClient candidate = server.available();
@@ -173,7 +185,6 @@ void procesarComandosRapido() {
   }
 }
 
-// OPTIMIZACIÓN: Procesador de comandos más rápido
 void procesarComandoRapido(String cmd) {
   cmd.trim();
   if (cmd.length() == 0) return;
@@ -184,7 +195,7 @@ void procesarComandoRapido(String cmd) {
   String up = cmd;
   up.toUpperCase();
 
-  // Comandos INMEDIATOS (sin procesamiento complejo) - MÁS RÁPIDOS
+  // Comandos INMEDIATOS
   if (up == "ON") {
     emergencyStop = false;
     motoresActivos = true;
@@ -204,7 +215,7 @@ void procesarComandoRapido(String cmd) {
     if (motoresActivos && !emergencyStop) {
       garra.write(posAbierta);
       current_deg[4] = posAbierta;
-      Serial.println("🟢 Garra abierta");
+      Serial.println("🟢 Garra abierta (100°)");
     } else Serial.println("⚠️ No energizado o E-STOP.");
     commandInProgress = false;
     return;
@@ -214,7 +225,7 @@ void procesarComandoRapido(String cmd) {
     if (motoresActivos && !emergencyStop) {
       garra.write(posCerrada);
       current_deg[4] = posCerrada;
-      Serial.println("🔴 Garra cerrada");
+      Serial.println("🔴 Garra cerrada (0°)");
     } else Serial.println("⚠️ No energizado o E-STOP.");
     commandInProgress = false;
     return;
@@ -243,7 +254,7 @@ void procesarComandoRapido(String cmd) {
     return;
   }
 
-  // Comandos que requieren movimiento (los procesamos normalmente)
+  // Comandos que requieren movimiento
   if (up.startsWith("M")) {
     procesarComando(cmd);
   } else if (up.startsWith("POS")) {
@@ -272,7 +283,6 @@ void verificarConexionWiFi() {
   }
 }
 
-// OPTIMIZACIÓN: Envío a nube más rápido
 void enviarEstadoALaNube() {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
@@ -280,7 +290,7 @@ void enviarEstadoALaNube() {
     String url = String(CLOUD_API_URL) + "/api/status/update";
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
-    http.setTimeout(2000); // OPTIMIZACIÓN: Timeout de 2 segundos
+    http.setTimeout(2000);
     
     String jsonData = generarJSONEstado();
     
@@ -306,6 +316,7 @@ String generarJSONEstado() {
   json += "\"motor3_deg\":" + String(current_deg[2]) + ",";
   json += "\"motor4_deg\":" + String(current_deg[3]) + ",";
   json += "\"garra_state\":\"" + String(current_deg[4] == posCerrada ? "CERRADA" : "ABIERTA") + "\",";
+  json += "\"garra_deg\":" + String(current_deg[4]) + ","; // ✅ Nuevo: grados de garra
   json += "\"emergency_stop\":" + String(emergencyStop ? "true" : "false") + ",";
   json += "\"motors_active\":" + String(motoresActivos ? "true" : "false") + ",";
   json += "\"connection_mode\":\"WIFI\",";
@@ -373,12 +384,11 @@ void start_wifi_server(uint16_t port) {
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
 
-  // OPTIMIZACIÓN: Timeout reducido de 15s a 10s
   unsigned long start = millis();
   const unsigned long timeout = 10000;
   
   while (WiFi.status() != WL_CONNECTED && millis() - start < timeout) {
-    delay(300); // OPTIMIZACIÓN: Delay reducido de 500 a 300ms
+    delay(300);
     Serial.print(".");
   }
 
@@ -426,7 +436,6 @@ void mantener_wifi() {
   if (AUTO_WIFI && !wifi_server_running) {
     if (WiFi.status() != WL_CONNECTED && !wifi_connecting) {
       static unsigned long lastTry = 0;
-      // OPTIMIZACIÓN: Intervalo aumentado de 8s a 12s
       if (millis() - lastTry > 12000) {
         Serial.println("🔄 AUTO_WIFI: intentando reconectar...");
         start_wifi_server(TCP_PORT_DEFAULT);
@@ -436,7 +445,7 @@ void mantener_wifi() {
   }
 }
 
-// ======================= COMANDOS (ORIGINAL PERO MÁS RÁPIDOS) =======================
+// ======================= COMANDOS CON MEJORAS DE VELOCIDAD =======================
 void procesarComando(String cmd) {
   cmd.trim();
   if (cmd.length() == 0) return;
@@ -468,17 +477,29 @@ void procesarComando(String cmd) {
       commandInProgress = false;
       return;
     }
-    int motor = cmd.substring(1, idx1).toInt() - 1;
+    int motor = cmd.substring(1, idx1).toInt() - 1; // Convertir a 0-indexed
     String direccion = cmd.substring(idx1 + 1, idx2);
     int pasos = cmd.substring(idx2 + 1, idx3).toInt();
-    int velocidad = cmd.substring(idx3 + 1).toInt();
+    int velocidad_solicitada = cmd.substring(idx3 + 1).toInt();
+    
     if (motor >= 0 && motor < 4) {
       if (motoresActivos && !emergencyStop) {
+        // ✅ APLICAR MODO DE VELOCIDAD SEGÚN MOTOR
+        int velocidad_final = aplicarModoVelocidad(motor, velocidad_solicitada);
+        
         bool sentidoHorario = (direccion == "H");
-        moverMotorPasos(motor, pasos, sentidoHorario, velocidad);
+        moverMotorPasos(motor, pasos, sentidoHorario, velocidad_final);
         float grados = ((float)pasos / 200.0) * 360.0;
         current_deg[motor] = fmod((current_deg[motor] + grados + 360.0), 360.0);
-        Serial.printf("✅ Motor %d movido (%.1f deg, vel=%d)\n", motor+1, grados, velocidad);
+        
+        // ✅ INFORMAR VELOCIDAD APLICADA
+        Serial.printf("✅ Motor %d movido (%.1f deg, vel=%d", motor+1, grados, velocidad_final);
+        if (motor == 2 && velocidad_final != velocidad_solicitada) {
+          Serial.print(" - MODO M3: 35 RPM FIJO");
+        } else if (motor == 3 && velocidad_final != velocidad_solicitada) {
+          Serial.print(" - MODO M4: 1000 RPM FIJO");
+        }
+        Serial.println(")");
       } else Serial.println("⚠️ No energizado o E-STOP.");
     } else Serial.println("❌ Motor fuera de rango.");
     commandInProgress = false;
@@ -533,15 +554,13 @@ long grados_a_pasos(float grados) {
   return (long)round(abs(pasos));
 }
 
-// OPTIMIZACIÓN: Movimiento más rápido
 void moverMotorPasos(int motor, long pasos, bool sentidoHorario, int velocidad) {
   if (motor < 0 || motor > 3) return;
   if (pasos <= 0) return;
   digitalWrite(dirPins[motor], sentidoHorario ? HIGH : LOW);
-  delayMicroseconds(100); // OPTIMIZACIÓN: Reducido de 1000 a 100
+  delayMicroseconds(100);
   
-  // OPTIMIZACIÓN: Velocidad más rápida
-  int delayMicros = map(velocidad, 1, 1000, 1200, 200); // Más rápido
+  int delayMicros = map(velocidad, 1, 1500, 1200, 200); // ✅ Actualizado para 1500 RPM max
   delayMicros = constrain(delayMicros, 200, 1200);
   
   for (long i=0; i<pasos; i++) {
@@ -561,15 +580,18 @@ void moverMotorPasos(int motor, long pasos, bool sentidoHorario, int velocidad) 
 void moverMotorPorDeltaDeg(int motor, float delta_deg, int velocidad) {
   if (motor < 0 || motor > 3) return;
   if (abs(delta_deg) < 0.5) return;
+  
+  // ✅ APLICAR MODO DE VELOCIDAD
+  int velocidad_final = aplicarModoVelocidad(motor, velocidad);
+  
   bool sentidoHorario = (delta_deg > 0);
   long pasos = grados_a_pasos(abs(delta_deg));
-  moverMotorPasos(motor, pasos, sentidoHorario, velocidad);
+  moverMotorPasos(motor, pasos, sentidoHorario, velocidad_final);
   current_deg[motor] += delta_deg;
   while (current_deg[motor] >= 360.0) current_deg[motor] -= 360.0;
   while (current_deg[motor] < 0.0) current_deg[motor] += 360.0;
 }
 
-// OPTIMIZACIÓN: Movimiento secuencial más rápido
 void moverMotorSecuencialDesdePos(float target_deg[5], int velocidad) {
   Serial.println("➡ POS: iniciando secuencia...");
   for (int m=0; m<4; m++) {
@@ -577,25 +599,35 @@ void moverMotorSecuencialDesdePos(float target_deg[5], int velocidad) {
     while (delta > 180.0) delta -= 360.0;
     while (delta < -180.0) delta += 360.0;
     if (abs(delta) >= 0.5) {
-      Serial.printf("➡️ M%d: delta=%.2f deg -> %ld pasos\n", m+1, delta, grados_a_pasos(abs(delta)));
-      moverMotorPorDeltaDeg(m, delta, velocidad);
+      // ✅ APLICAR MODO DE VELOCIDAD POR MOTOR
+      int velocidad_motor = aplicarModoVelocidad(m, velocidad);
+      Serial.printf("➡️ M%d: delta=%.2f deg -> %ld pasos (vel=%d", m+1, delta, grados_a_pasos(abs(delta)), velocidad_motor);
+      if (m == 2 && velocidad_motor != velocidad) {
+        Serial.print(" - MODO M3: 35 RPM FIJO");
+      } else if (m == 3 && velocidad_motor != velocidad) {
+        Serial.print(" - MODO M4: 1000 RPM FIJO");
+      }
+      Serial.println(")");
+      
+      moverMotorPorDeltaDeg(m, delta, velocidad_motor);
       if (emergencyStop) {
         Serial.println("⛔ E-STOP activado, abortando secuencia POS.");
         commandInProgress = false;
         return;
       }
-      delay(80); // OPTIMIZACIÓN: Reducido de 120 a 80ms
+      delay(80);
     }
   }
 
-  if (target_deg[4] >= 90.0) {
-    garra.write(posCerrada);
-    current_deg[4] = posCerrada;
-    Serial.println("🔐 Garra cerrada (POS)");
-  } else {
+  // ✅ GARRA CORREGIDA: 100° = Abierto, 0° = Cerrado
+  if (target_deg[4] >= 50.0) { // Umbral a 50° para abrir/cerrar
     garra.write(posAbierta);
     current_deg[4] = posAbierta;
-    Serial.println("🔓 Garra abierta (POS)");
+    Serial.println("🔐 Garra abierta (100°) - (POS)");
+  } else {
+    garra.write(posCerrada);
+    current_deg[4] = posCerrada;
+    Serial.println("🔓 Garra cerrada (0°) - (POS)");
   }
 
   Serial.println("✅ Movimiento POS completo.");
