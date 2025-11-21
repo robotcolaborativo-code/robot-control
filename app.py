@@ -3,17 +3,14 @@ from flask_cors import CORS
 import mysql.connector
 import os
 import time
-import traceback
 import threading
-import requests
-from datetime import datetime, timedelta
-import json
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
 
 # ======================= CONFIGURACIÓN =======================
-ESP32_IP = "10.31.183.131"  # IP deel ESP32
+ESP32_IP = "10.31.183.131"  # IP del ESP32
 TCP_PORT = 8080
 SERIAL_MODE = False  # Por defecto usamos WiFi
 
@@ -257,7 +254,7 @@ threading.Thread(target=procesador_comandos, daemon=True).start()
 # Configurar base de datos al inicio
 setup_database()
 
-# ======================= HTML DASHBOARD MEJORADO =======================
+# ======================= HTML DASHBOARD =======================
 HTML_DASHBOARD = '''
 <!DOCTYPE html>
 <html>
@@ -273,8 +270,7 @@ HTML_DASHBOARD = '''
         .header h1 { font-size: 2.5em; margin-bottom: 10px; background: linear-gradient(45deg, #00b4db, #0083b0); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3); }
         .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
         @media (max-width: 1024px) { .dashboard-grid { grid-template-columns: 1fr; } }
-        .panel { background: rgba(255, 255, 255, 0.1); border-radius: 15px; padding: 25px; backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); transition: transform 0.3s ease, box-shadow 0.3s ease; }
-        .panel:hover { transform: translateY(-5px); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); }
+        .panel { background: rgba(255, 255, 255, 0.1); border-radius: 15px; padding: 25px; backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); }
         .panel h2 { font-size: 1.8em; margin-bottom: 20px; color: #00b4db; border-bottom: 2px solid #00b4db; padding-bottom: 10px; }
         .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
         .status-item { background: rgba(0, 0, 0, 0.3); padding: 15px; border-radius: 10px; text-align: center; border-left: 4px solid #00b4db; }
@@ -286,37 +282,29 @@ HTML_DASHBOARD = '''
         .control-group { margin-bottom: 25px; }
         .control-group h3 { font-size: 1.3em; margin-bottom: 15px; color: #00b4db; }
         .btn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 15px; }
-        .btn { padding: 12px 20px; border: none; border-radius: 8px; font-size: 1em; font-weight: bold; cursor: pointer; transition: all 0.3s ease; text-align: center; background: linear-gradient(45deg, #00b4db, #0083b0); color: white; border: 2px solid transparent; }
+        .btn { padding: 12px 20px; border: none; border-radius: 8px; font-size: 1em; font-weight: bold; cursor: pointer; transition: all 0.3s ease; text-align: center; background: linear-gradient(45deg, #00b4db, #0083b0); color: white; }
         .btn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0, 180, 219, 0.4); }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
         .btn-emergency { background: linear-gradient(45deg, #ff4444, #cc0000); }
         .btn-success { background: linear-gradient(45deg, #00C851, #007E33); }
         .btn-warning { background: linear-gradient(45deg, #ffbb33, #FF8800); }
         .input-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 10px; }
         .input-group input, .input-group select { padding: 10px; border: none; border-radius: 5px; background: rgba(255, 255, 255, 0.1); color: white; border: 1px solid rgba(255, 255, 255, 0.3); }
-        .input-group input:focus, .input-group select:focus { outline: none; border-color: #00b4db; box-shadow: 0 0 10px rgba(0, 180, 219, 0.3); }
+        .input-group input:focus, .input-group select:focus { outline: none; border-color: #00b4db; }
         .motor-control { background: rgba(0, 0, 0, 0.2); padding: 15px; border-radius: 10px; margin-bottom: 15px; }
-        .animation-container { text-align: center; padding: 20px; background: rgba(0, 0, 0, 0.3); border-radius: 10px; margin-top: 20px; }
-        .robot-visual { width: 200px; height: 200px; margin: 0 auto; background: linear-gradient(45deg, #2c5364, #203a43); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 3em; border: 3px solid #00b4db; box-shadow: 0 0 20px rgba(0, 180, 219, 0.5); }
         .alert { padding: 15px; margin: 10px 0; border-radius: 5px; font-weight: bold; text-align: center; }
         .alert.success { background: rgba(0, 200, 81, 0.2); border: 1px solid #00C851; color: #00C851; }
         .alert.error { background: rgba(255, 68, 68, 0.2); border: 1px solid #ff4444; color: #ff4444; }
         .alert.warning { background: rgba(255, 187, 51, 0.2); border: 1px solid #ffbb33; color: #ffbb33; }
         .conexion-status { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
-        .status-indicator { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+        .status-indicator { width: 12px; height: 12px; border-radius: 50%; }
         .status-connected { background: #00C851; box-shadow: 0 0 10px #00C851; }
         .status-disconnected { background: #ff4444; box-shadow: 0 0 10px #ff4444; }
         .status-connecting { background: #ffbb33; box-shadow: 0 0 10px #ffbb33; animation: pulse 1s infinite; }
         .posiciones-container { background: rgba(0, 0, 0, 0.2); padding: 15px; border-radius: 10px; margin-top: 15px; }
-        .posicion-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; margin: 5px 0; background: rgba(255, 255, 255, 0.1); border-radius: 5px; cursor: pointer; transition: background 0.3s ease; }
-        .posicion-item:hover { background: rgba(255, 255, 255, 0.2); }
+        .posicion-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; margin: 5px 0; background: rgba(255, 255, 255, 0.1); border-radius: 5px; }
         .posicion-info { flex-grow: 1; }
         .posicion-actions { display: flex; gap: 5px; }
         .btn-small { padding: 5px 10px; font-size: 0.8em; }
-        .pulse { animation: pulse 2s infinite; }
-        .modo-velocidad-info { background: rgba(0, 0, 0, 0.3); padding: 10px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #ffbb33; }
-        .modo-velocidad-info h4 { margin-bottom: 5px; color: #ffbb33; }
-        .modo-item { display: flex; justify-content: space-between; margin: 3px 0; font-size: 0.9em; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
@@ -356,14 +344,6 @@ HTML_DASHBOARD = '''
                         <div class="label">⚡ Velocidad</div>
                         <div class="value" id="velocidad-actual">Cargando...</div>
                     </div>
-                    <div class="status-item">
-                        <div class="label">📶 WiFi</div>
-                        <div class="value" id="wifi-status">Cargando...</div>
-                    </div>
-                    <div class="status-item">
-                        <div class="label">🕒 Última Actualización</div>
-                        <div class="value" id="ultima-actualizacion">Cargando...</div>
-                    </div>
                 </div>
 
                 <div class="status-grid">
@@ -385,35 +365,6 @@ HTML_DASHBOARD = '''
                     </div>
                 </div>
 
-                <!-- Información de modos de velocidad -->
-                <div class="modo-velocidad-info">
-                    <h4>ℹ️ Modos de Velocidad</h4>
-                    <div class="modo-item">
-                        <span>M1, M2:</span>
-                        <span style="color: #00C851;">Control completo (1-1500 RPM)</span>
-                    </div>
-                    <div class="modo-item">
-                        <span>M3:</span>
-                        <span style="color: #ffbb33;">Velocidad fija 35 RPM</span>
-                    </div>
-                    <div class="modo-item">
-                        <span>M4:</span>
-                        <span style="color: #ffbb33;">Velocidad fija 1000 RPM</span>
-                    </div>
-                    <div class="modo-item">
-                        <span>Garra:</span>
-                        <span style="color: #00b4db;">100°=Abierto, 0°=Cerrado</span>
-                    </div>
-                </div>
-
-                <div class="control-group">
-                    <h3>🔌 Configuración de Conexión</h3>
-                    <div class="btn-grid">
-                        <button class="btn" onclick="cambiarModoConexion('SERIAL')">🔌 MODO SERIAL</button>
-                        <button class="btn" onclick="cambiarModoConexion('WIFI')">📡 MODO Wi-Fi</button>
-                    </div>
-                </div>
-
                 <div class="control-group">
                     <h3>🎮 Control General</h3>
                     <div class="btn-grid">
@@ -431,11 +382,6 @@ HTML_DASHBOARD = '''
                         <button class="btn" onclick="controlGarra('CERRAR')">🔒 CERRAR GARRA</button>
                     </div>
                 </div>
-
-                <div class="animation-container">
-                    <div class="robot-visual pulse">🤖</div>
-                    <p style="margin-top: 15px; opacity: 0.8;">Robot 4DOF + Garra</p>
-                </div>
             </div>
 
             <!-- PANEL DERECHO: CONTROL AVANZADO -->
@@ -448,10 +394,10 @@ HTML_DASHBOARD = '''
                     <div class="input-group">
                         <label for="motor-select">Motor:</label>
                         <select id="motor-select">
-                            <option value="1">M1 - Control completo (1-1500 RPM)</option>
-                            <option value="2">M2 - Control completo (1-1500 RPM)</option>
-                            <option value="3">M3 - Velocidad fija 35 RPM</option>
-                            <option value="4">M4 - Velocidad fija 1000 RPM</option>
+                            <option value="1">M1</option>
+                            <option value="2">M2</option>
+                            <option value="3">M3</option>
+                            <option value="4">M4</option>
                         </select>
                     </div>
 
@@ -507,7 +453,7 @@ HTML_DASHBOARD = '''
                     </div>
 
                     <div class="input-group">
-                        <label for="velocidad-pos">Velocidad M1/M2 (1-1500 RPM):</label>
+                        <label for="velocidad-pos">Velocidad (RPM):</label>
                         <input type="number" id="velocidad-pos" value="500" min="1" max="1500">
                     </div>
 
@@ -519,7 +465,6 @@ HTML_DASHBOARD = '''
                     
                     <div class="btn-grid">
                         <button class="btn" onclick="guardarPosicion()">💾 GUARDAR POSICIÓN</button>
-                        <button class="btn btn-warning" onclick="cargarPosicionActual()">📥 CARGAR ACTUAL</button>
                     </div>
 
                     <div class="posiciones-container">
@@ -531,10 +476,6 @@ HTML_DASHBOARD = '''
     </div>
 
     <script>
-        let modoConexionActual = 'WIFI';
-        let posicionesGuardadas = [];
-        let ultimoEstado = null;
-
         function showAlert(message, type = 'success') {
             const alertContainer = document.getElementById('alert-container');
             const alert = document.createElement('div');
@@ -545,42 +486,19 @@ HTML_DASHBOARD = '''
             setTimeout(() => { alert.remove(); }, 5000);
         }
 
-        function actualizarIndicadorConexion(modo, estado) {
+        function actualizarIndicadorConexion(estado) {
             const indicator = document.getElementById('status-indicator');
             const text = document.getElementById('conexion-text');
             
             if (estado === 'conectado') {
                 indicator.className = 'status-indicator status-connected';
-                text.textContent = `Conectado vía ${modo}`;
+                text.textContent = 'Conectado al robot';
             } else if (estado === 'conectando') {
                 indicator.className = 'status-indicator status-connecting';
-                text.textContent = `Conectando vía ${modo}...`;
+                text.textContent = 'Conectando al robot...';
             } else {
                 indicator.className = 'status-indicator status-disconnected';
                 text.textContent = 'Desconectado';
-            }
-        }
-
-        async function cambiarModoConexion(modo) {
-            actualizarIndicadorConexion(modo, 'conectando');
-            try {
-                const response = await fetch('/api/cambiar_conexion', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ modo: modo })
-                });
-                const result = await response.json();
-                if (result.status === 'success') {
-                    modoConexionActual = modo;
-                    actualizarIndicadorConexion(modo, 'conectado');
-                    showAlert(`✅ Modo cambiado a ${modo}`);
-                } else {
-                    actualizarIndicadorConexion(modoConexionActual, 'conectado');
-                    showAlert(`❌ Error: ${result.error}`, 'error');
-                }
-            } catch (error) {
-                actualizarIndicadorConexion(modoConexionActual, 'conectado');
-                showAlert('❌ Error de conexión', 'error');
             }
         }
 
@@ -590,7 +508,7 @@ HTML_DASHBOARD = '''
                 const estado = await response.json();
                 if (estado.error) {
                     document.getElementById('estado-container').innerHTML = `<div class="alert error">❌ ${estado.error}</div>`;
-                    actualizarIndicadorConexion(modoConexionActual, 'desconectado');
+                    actualizarIndicadorConexion('desconectado');
                     return;
                 }
                 
@@ -598,21 +516,18 @@ HTML_DASHBOARD = '''
                 document.getElementById('motores-activos').textContent = estado.motores_activos ? 'ACTIVOS' : 'INACTIVOS';
                 document.getElementById('motores-activos').className = estado.motores_activos ? 'value active' : 'value';
                 document.getElementById('emergency-stop').textContent = estado.emergency_stop ? 'ACTIVADA' : 'NORMAL';
-                document.getElementById('garra-estado').textContent = estado.garra_abierta ? 'ABIERTA (' + estado.garra_grados + '°)' : 'CERRADA (' + estado.garra_grados + '°)';
+                document.getElementById('garra-estado').textContent = estado.garra_abierta ? 'ABIERTA' : 'CERRADA';
                 document.getElementById('velocidad-actual').textContent = estado.velocidad_actual + ' RPM';
-                document.getElementById('wifi-status').textContent = estado.conexion_wifi ? 'Conectado (' + estado.senal_wifi + ' dBm)' : 'Desconectado';
-                document.getElementById('wifi-status').className = estado.conexion_wifi ? 'value active' : 'value warning';
                 document.getElementById('posicion-m1').textContent = estado.posicion_m1 + '°';
                 document.getElementById('posicion-m2').textContent = estado.posicion_m2 + '°';
                 document.getElementById('posicion-m3').textContent = estado.posicion_m3 + '°';
                 document.getElementById('posicion-m4').textContent = estado.posicion_m4 + '°';
-                document.getElementById('ultima-actualizacion').textContent = new Date(estado.timestamp).toLocaleTimeString();
                 
-                actualizarIndicadorConexion(modoConexionActual, 'conectado');
+                actualizarIndicadorConexion('conectado');
                 
             } catch (error) {
                 console.error('Error actualizando estado:', error);
-                actualizarIndicadorConexion(modoConexionActual, 'desconectado');
+                actualizarIndicadorConexion('desconectado');
             }
         }
 
@@ -621,28 +536,27 @@ HTML_DASHBOARD = '''
                 const response = await fetch('/api/posiciones');
                 const result = await response.json();
                 if (result.status === 'success') {
-                    posicionesGuardadas = result.posiciones;
-                    actualizarListaPosiciones();
+                    actualizarListaPosiciones(result.posiciones);
                 }
             } catch (error) {
                 console.error('Error cargando posiciones:', error);
             }
         }
 
-        function actualizarListaPosiciones() {
+        function actualizarListaPosiciones(posiciones) {
             const lista = document.getElementById('lista-posiciones');
             lista.innerHTML = '';
-            if (posicionesGuardadas.length === 0) {
+            if (posiciones.length === 0) {
                 lista.innerHTML = '<div style="text-align: center; opacity: 0.7;">No hay posiciones guardadas</div>';
                 return;
             }
-            posicionesGuardadas.forEach((pos, index) => {
+            posiciones.forEach((pos) => {
                 const item = document.createElement('div');
                 item.className = 'posicion-item';
                 item.innerHTML = `
                     <div class="posicion-info">
                         <strong>${pos.nombre}</strong><br>
-                        <small>M1:${pos.posicion_m1}° M2:${pos.posicion_m2}° M3:${pos.posicion_m3}° M4:${pos.posicion_m4}° Vel:${pos.velocidad}RPM</small>
+                        <small>M1:${pos.posicion_m1}° M2:${pos.posicion_m2}° M3:${pos.posicion_m3}° M4:${pos.posicion_m4}°</small>
                     </div>
                     <div class="posicion-actions">
                         <button class="btn btn-small" onclick="cargarPosicion(${pos.id})">📥</button>
@@ -651,11 +565,6 @@ HTML_DASHBOARD = '''
                 `;
                 lista.appendChild(item);
             });
-        }
-
-        function cargarPosicionActual() {
-            // Esta función cargaría la posición actual del robot en los campos
-            showAlert('📥 Funcionalidad en desarrollo - Próximamente');
         }
 
         async function cargarPosicion(id) {
@@ -700,7 +609,6 @@ HTML_DASHBOARD = '''
                 const result = await response.json();
                 if (result.status === 'success') {
                     showAlert(`✅ Comando ${comando} enviado correctamente`);
-                    // Esperar un poco y actualizar estado
                     setTimeout(actualizarEstado, 1000);
                 } else {
                     showAlert(`❌ Error: ${result.error}`, 'error');
@@ -816,7 +724,7 @@ HTML_DASHBOARD = '''
         document.addEventListener('DOMContentLoaded', function() {
             actualizarEstado();
             cargarPosiciones();
-            actualizarIndicadorConexion('WIFI', 'conectando');
+            actualizarIndicadorConexion('conectando');
         });
     </script>
 </body>
@@ -847,35 +755,6 @@ def enviar_comando(accion):
         conn.close()
         
         return jsonify({"status": "success", "comando": accion})
-        
-    except Exception as e:
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/cambiar_conexion', methods=['POST'])
-def cambiar_conexion():
-    """Cambiar entre modo Serial y Wi-Fi"""
-    try:
-        data = request.json
-        modo = data.get('modo')
-        
-        global SERIAL_MODE
-        SERIAL_MODE = (modo == 'SERIAL')
-        
-        conn = get_db_connection()
-        if conn is None:
-            return jsonify({"status": "error", "error": "No database connection"}), 500
-            
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            "INSERT INTO comandos_robot (esp32_id, comando, modo_conexion) VALUES (%s, %s, %s)",
-            ('cobot_01', f'MODE:{modo}', modo)
-        )
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return jsonify({"status": "success", "mensaje": f"Modo cambiado a {modo}"})
         
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
@@ -1098,59 +977,6 @@ def obtener_estado():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
-# ======================= RUTAS PARA COMUNICACIÓN CON ESP32 =======================
-@app.route('/api/comandos_pendientes/<esp32_id>')
-def obtener_comandos_pendientes(esp32_id):
-    """Obtener comandos pendientes para un ESP32"""
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            return jsonify({"status": "error", "error": "No database connection"}), 500
-            
-        cursor = conn.cursor()
-        
-        # Obtener comandos no ejecutados
-        cursor.execute(
-            "SELECT * FROM comandos_robot WHERE esp32_id = %s AND (ejecutado IS NULL OR ejecutado = FALSE) ORDER BY timestamp ASC LIMIT 10",
-            (esp32_id,)
-        )
-        comandos = cursor.fetchall()
-        
-        comandos_list = []
-        for cmd in comandos:
-            comando_data = {
-                "id": cmd[0],
-                "comando": cmd[2],
-                "motor_num": cmd[4],
-                "pasos": cmd[5],
-                "velocidad": cmd[6],
-                "direccion": cmd[7],
-                "posicion_m1": cmd[8],
-                "posicion_m2": cmd[9],
-                "posicion_m3": cmd[10],
-                "posicion_m4": cmd[11]
-            }
-            comandos_list.append(comando_data)
-        
-        # Marcar como ejecutados
-        if comandos:
-            ids = [str(cmd[0]) for cmd in comandos]
-            placeholders = ','.join(['%s'] * len(ids))
-            cursor.execute(
-                f"UPDATE comandos_robot SET ejecutado = TRUE WHERE id IN ({placeholders})",
-                ids
-            )
-            conn.commit()
-        
-        cursor.close()
-        conn.close()
-        
-        return jsonify({"status": "success", "comandos": comandos_list})
-        
-    except Exception as e:
-        print(f"❌ Error en comandos_pendientes: {e}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
 @app.route('/api/actualizar_estado', methods=['POST'])
 def actualizar_estado():
     """Actualizar estado del robot desde el ESP32"""
@@ -1206,15 +1032,12 @@ def test_api():
     return jsonify({
         "status": "success", 
         "message": "✅ API funcionando correctamente",
-        "timestamp": time.time(),
-        "modo_actual": "SERIAL" if SERIAL_MODE else "WIFI"
+        "timestamp": time.time()
     })
 
 # ======================= INICIALIZACIÓN =======================
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     print(f"🚀 Iniciando servidor Flask en puerto {port}")
-    print(f"📡 IP del ESP32: {ESP32_IP}")
-    print(f"🔌 Puerto TCP: {TCP_PORT}")
     print("✅ Dashboard disponible en: http://localhost:5000")
     app.run(host='0.0.0.0', port=port, debug=False)
