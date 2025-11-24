@@ -6,20 +6,20 @@ import traceback
 
 app = Flask(__name__)
 
-# ======================= CONEXIÓN MYSQL =======================
+# ======================= CONEXIÓN MYSQL RAILWAY =======================
 def get_db_connection():
     try:
         conn = mysql.connector.connect(
-            host=os.environ.get('MYSQL_HOST', 'turntable.proxy.rlwy.net'),
+            host=os.environ.get('MYSQL_HOST', 'mysql.railway.internal'),
             user=os.environ.get('MYSQL_USER', 'root'),
-            password=os.environ.get('MYSQL_PASSWORD', 'QttFmgSWJcoJfFKJNFwuscHPWPSESxWs'),
+            password=os.environ.get('MYSQL_PASSWORD', 'tjY0IyQbkDoRQfyxGFifidUnLorHhPPm'),
             database=os.environ.get('MYSQL_DATABASE', 'railway'),
-            port=int(os.environ.get('MYSQL_PORT', 57488)),
+            port=int(os.environ.get('MYSQL_PORT', 3396)),
             connect_timeout=10
         )
         return conn
     except Exception as e:
-        print(f"❌ Error conectando a MySQL: {e}")
+        print(f"❌ Error conectando a MySQL Railway: {e}")
         return None
 
 # ======================= CONFIGURACIÓN INICIAL =======================
@@ -27,7 +27,7 @@ def setup_database():
     try:
         conn = get_db_connection()
         if conn is None:
-            print("❌ No se pudo conectar a la base de datos")
+            print("❌ No se pudo conectar a la base de datos Railway")
             return False
             
         cursor = conn.cursor()
@@ -97,14 +97,15 @@ def setup_database():
         conn.commit()
         cursor.close()
         conn.close()
-        print("✅ BASE DE DATOS CONFIGURADA CORRECTAMENTE")
+        print("✅ BASE DE DATOS RAILWAY CONFIGURADA CORRECTAMENTE")
         return True
         
     except Exception as e:
-        print(f"❌ Error configurando BD: {e}")
+        print(f"❌ Error configurando BD Railway: {e}")
         return False
 
 # Configurar base de datos al inicio
+print("🚀 Iniciando configuración de base de datos Railway...")
 setup_database()
 
 # ======================= HTML DASHBOARD COMPLETO =======================
@@ -1008,4 +1009,5 @@ def test_api():
 # ======================= INICIALIZACIÓN =======================
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
+    print(f"🚀 Iniciando Dashboard conectado a Railway MySQL...")
     app.run(host='0.0.0.0', port=port, debug=False)
