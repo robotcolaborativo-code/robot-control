@@ -1,25 +1,26 @@
 from flask import Flask, jsonify, render_template_string, request
-import mysql.connector
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import os
 import time
 import traceback
 
 app = Flask(__name__)
 
-# ======================= CONEXIÓN MYSQL RAILWAY =======================
+# ======================= CONEXIÓN POSTGRES RENDER =======================
 def get_db_connection():
     try:
-        conn = mysql.connector.connect(
-            host=os.environ.get('MYSQL_HOST', 'mysql.railway.internal'),
-            user=os.environ.get('MYSQL_USER', 'root'),
-            password=os.environ.get('MYSQL_PASSWORD', 'tjY0IyQbkDoRQfyxGFifidUnLorHhPPm'),
-            database=os.environ.get('MYSQL_DATABASE', 'railway'),
-            port=int(os.environ.get('MYSQL_PORT', 3396)),
+        conn = psycopg2.connect(
+            host='dpg-d4i8haemcj7s73cf1uo0-a',
+            database='cobot_db',
+            user='mi_usuario',
+            password='IRaaPDN3beLQ5qWOHMoqIpHShRENh09o',
+            port=5432,
             connect_timeout=10
         )
         return conn
     except Exception as e:
-        print(f"❌ Error conectando a MySQL Railway: {e}")
+        print(f"❌ Error conectando a PostgreSQL: {e}")
         return None
 
 # ======================= CONFIGURACIÓN INICIAL =======================
@@ -27,7 +28,7 @@ def setup_database():
     try:
         conn = get_db_connection()
         if conn is None:
-            print("❌ No se pudo conectar a la base de datos Railway")
+            print("❌ No se pudo conectar a la base de datos PostgreSQL")
             return False
             
         cursor = conn.cursor()
@@ -35,7 +36,7 @@ def setup_database():
         # Crear tablas si no existen
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS comandos_robot (
-                id INT AUTO_INCREMENT PRIMARY KEY,
+                id SERIAL PRIMARY KEY,
                 esp32_id VARCHAR(50),
                 comando VARCHAR(100),
                 parametros TEXT,
@@ -56,7 +57,7 @@ def setup_database():
         
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS moduls_tellis (
-                id INT AUTO_INCREMENT PRIMARY KEY,
+                id SERIAL PRIMARY KEY,
                 esp32_id VARCHAR(50),
                 motores_activos BOOLEAN,
                 emergency_stop BOOLEAN,
@@ -72,7 +73,7 @@ def setup_database():
         
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS posiciones_guardadas (
-                id INT AUTO_INCREMENT PRIMARY KEY,
+                id SERIAL PRIMARY KEY,
                 nombre VARCHAR(100),
                 posicion_m1 FLOAT,
                 posicion_m2 FLOAT,
@@ -91,24 +92,24 @@ def setup_database():
                 INSERT INTO moduls_tellis 
                 (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta, velocidad_actual) 
                 VALUES 
-                ('CDBOT_001', 1, 0, 0, 0, 0, 0, 1, 500)
+                ('CDBOT_001', TRUE, FALSE, 0, 0, 0, 0, TRUE, 500)
             ''')
         
         conn.commit()
         cursor.close()
         conn.close()
-        print("✅ BASE DE DATOS RAILWAY CONFIGURADA CORRECTAMENTE")
+        print("✅ BASE DE DATOS POSTGRESQL CONFIGURADA CORRECTAMENTE")
         return True
         
     except Exception as e:
-        print(f"❌ Error configurando BD Railway: {e}")
+        print(f"❌ Error configurando BD PostgreSQL: {e}")
         return False
 
 # Configurar base de datos al inicio
-print("🚀 Iniciando configuración de base de datos Railway...")
+print("🚀 Iniciando configuración de base de datos PostgreSQL...")
 setup_database()
 
-# ======================= HTML DASHBOARD COMPLETO =======================
+# ======================= HTML DASHBOARD (EL MISMO) =======================
 HTML_DASHBOARD = '''
 <!DOCTYPE html>
 <html>
@@ -961,19 +962,20 @@ def actualizar_estado():
             
         cursor = conn.cursor()
         
+        # Para PostgreSQL usamos INSERT con ON CONFLICT
         cursor.execute('''
             INSERT INTO moduls_tellis 
             (esp32_id, motores_activos, emergency_stop, posicion_m1, posicion_m2, posicion_m3, posicion_m4, garra_abierta, velocidad_actual) 
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-            motores_activos = VALUES(motores_activos),
-            emergency_stop = VALUES(emergency_stop),
-            posicion_m1 = VALUES(posicion_m1),
-            posicion_m2 = VALUES(posicion_m2),
-            posicion_m3 = VALUES(posicion_m3),
-            posicion_m4 = VALUES(posicion_m4),
-            garra_abierta = VALUES(garra_abierta),
-            velocidad_actual = VALUES(velocidad_actual),
+            ON CONFLICT (esp32_id) DO UPDATE SET
+            motores_activos = EXCLUDED.motores_activos,
+            emergency_stop = EXCLUDED.emergency_stop,
+            posicion_m1 = EXCLUDED.posicion_m1,
+            posicion_m2 = EXCLUDED.posicion_m2,
+            posicion_m3 = EXCLUDED.posicion_m3,
+            posicion_m4 = EXCLUDED.posicion_m4,
+            garra_abierta = EXCLUDED.garra_abierta,
+            velocidad_actual = EXCLUDED.velocidad_actual,
             timestamp = CURRENT_TIMESTAMP
         ''', (
             data.get('esp32_id', 'CDBOT_001'),
@@ -1009,5 +1011,5 @@ def test_api():
 # ======================= INICIALIZACIÓN =======================
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    print(f"🚀 Iniciando Dashboard conectado a Railway MySQL...")
+    print(f"🚀 Iniciando Dashboard conectado a PostgreSQL...")
     app.run(host='0.0.0.0', port=port, debug=False)
