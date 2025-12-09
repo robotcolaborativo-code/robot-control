@@ -1,0 +1,1325 @@
+#include <WiFi.h>
+#include <ESP32Servo.h>
+#include <vector>
+
+// ======================= CONFIG =======================
+const char* ssid = "RedmiCristian";
+const char* password = "123456789";
+const uint16_t TCP_PORT_DEFAULT = 8080;
+
+// CONEXIÓN AUTOMÁTICA ACTIVADA
+const bool AUTO_WIFI = true;
+
+// Configuración CORREGIDA de pasos por revolución
+const long PASOS_POR_REVOLUCION = 6600;  // 6600 pasos = 360 grados
+const float PASOS_POR_GRADO = 6600.0 / 360.0; // 18.33 pasos/grado
+
+// ======================= HARDWARE =======================
+const int WIFI_LED = 2;
+const int STATUS_LED = 4;
+
+int stepPins[4] = {27, 13, 33, 18};
+int dirPins[4]  = {21, 15, 32, 19};
+
+Servo garra;
+int pinServo = 23;
+int posAbierta = 100;   // Cambiado: Ahora 100 es abierto
+int posCerrada = 0;     // Cambiado: Ahora 0 es cerrado
+
+// ======================= ESTADO =======================
+WiFiServer server(TCP_PORT_DEFAULT);
+WiFiClient clientTCP;
+bool wifi_server_running = false;
+bool wifi_connecting = false;
+
+// Estado de conexión mejorado
+enum WiFiStatus {
+  WIFI_DISCONNECTED,
+  WIFI_CONNECTING, 
+  WIFI_CONNECTED
+};
+WiFiStatus wifi_status = WIFI_DISCONNECTED;
+
+String inputString = "";
+bool motoresActivos = false;
+bool emergencyStop = false;
+bool communicationDisabled = false;
+float current_deg[5] = {0,0,0,0,0};
+float zero_reference[4] = {0,0,0,0};  // Cero de referencia virtual
+
+// TIMING OPTIMIZADO - MÁS RÁPIDO
+bool ledState = LOW;
+unsigned long ledLastToggle = 0;
+const unsigned long LED_BLINK_MS = 300;
+unsigned long lastWifiCheck = 0;
+const unsigned long WIFI_CHECK_INTERVAL = 20000;
+unsigned long lastCommandTime = 0;
+bool commandInProgress = false;
+
+// ======================= NUEVAS VARIABLES PARA PICK-AND-PLACE =======================
+bool ejecutandoPickAndPlace = false;
+bool primeraTrayectoriaCompletada = false;
+
+// ======================= DECLARACIONES DE FUNCIONES =======================
+void procesarComando(String cmd);
+void start_wifi_server(uint16_t port = TCP_PORT_DEFAULT);
+void stop_wifi_server_complete();
+void mantener_wifi();
+void update_wifi_led();
+void moverMotorPasos(int motor, long pasos, bool sentidoHorario, int velocidad);
+long grados_a_pasos(float grados);
+void moverMotorPorDeltaDeg(int motor, float delta_deg, int velocidad);
+void moverMotorSecuencialDesdePos(float target_deg[5], int velocidad);
+void verificarConexionWiFi();
+void actualizarEstadoWiFi();
+void procesarComandosRapido();
+void procesarComandoRapido(String cmd);
+void moverTrayectoriaCoordinada(float target_deg[4], String direcciones, int velocidad, String estadoGarra, bool esSegundaTrayectoria = false);
+void emergencyStopComplete();
+void setZeroReference();
+float getVirtualAngle(int motor);
+float normalizeAngle(float angle);
+void procesarComandoPickAndPlace(String cmd);
+bool ejecutarTrayectoriaDesdeString(String trayCmd);
+bool parsearComandoTRAY(String cmd, float* targets, String& direcciones, int& velocidad, String& estadoGarra);
+
+// ======================= SETUP =======================
+void setup() {
+  Serial.begin(115200);
+  Serial.setTimeout(10);
+  delay(200);
+  Serial.println("\n🔧 Iniciando ESP32 Cobot...");
+  Serial.println("🤖 ESP32 listo...");
+
+  pinMode(WIFI_LED, OUTPUT);
+  pinMode(STATUS_LED, OUTPUT);
+  digitalWrite(WIFI_LED, LOW);
+  digitalWrite(STATUS_LED, LOW);
+  ledState = LOW;
+
+  for (int i = 0; i < 4; ++i) {
+    pinMode(stepPins[i], OUTPUT);
+    pinMode(dirPins[i], OUTPUT);
+    digitalWrite(stepPins[i], LOW);
+    digitalWrite(dirPins[i], LOW);
+  }
+
+  garra.attach(pinServo);
+  garra.write(posAbierta);
+  current_deg[4] = posAbierta;
+
+  motoresActivos = false;
+  emergencyStop = false;
+  communicationDisabled = false;
+  ejecutandoPickAndPlace = false;
+  primeraTrayectoriaCompletada = false;
+  
+  // Inicializar cero de referencia con posición actual
+  setZeroReference();
+
+  // CONEXIÓN AUTOMÁTICA ACTIVADA
+  if (AUTO_WIFI) {
+    Serial.println("📡 Iniciando conexión WiFi automática...");
+    start_wifi_server(TCP_PORT_DEFAULT);
+  }
+}
+
+// ======================= NUEVAS FUNCIONES PARA SISTEMA DE COORDENADAS =======================
+
+float normalizeAngle(float angle) {
+  // Normalizar ángulo a rango -180 a 180
+  while (angle > 180.0) angle -= 360.0;
+  while (angle < -180.0) angle += 360.0;
+  return angle;
+}
+
+void setZeroReference() {
+  // Establecer la posición actual como cero de referencia
+  for (int i = 0; i < 4; i++) {
+    zero_reference[i] = current_deg[i];
+    Serial.printf("🔧 Motor %d: Cero referencia establecido en %.1f°\n", i+1, zero_reference[i]);
+  }
+}
+
+float getVirtualAngle(int motor) {
+  if (motor < 0 || motor >= 4) return 0.0;
+  
+  // Calcular ángulo virtual relativo al cero de referencia
+  float virtual_angle = current_deg[motor] - zero_reference[motor];
+  
+  // Normalizar a rango -180 a 180
+  return normalizeAngle(virtual_angle);
+}
+
+// ======================= LOOP OPTIMIZADO =======================
+void loop() {
+  // Si está deshabilitada la comunicación, solo verificar emergencias
+  if (communicationDisabled) {
+    // Parpadeo rápido de LED de estado para indicar paro de emergencia
+    if (millis() - ledLastToggle >= 100) {
+      digitalWrite(STATUS_LED, !digitalRead(STATUS_LED));
+      ledLastToggle = millis();
+    }
+    
+    // Solo procesar comandos de RESET para recuperar
+    if (Serial.available()) {
+      char c = (char)Serial.read();
+      if (c == '\n' || c == '\r') {
+        inputString.trim();
+        String up = inputString;
+        up.toUpperCase();
+        
+        // Solo RESET y ON permitidos para recuperar sistema
+        if (up == "RESET") {
+          communicationDisabled = false;
+          emergencyStop = false;
+          Serial.println("🔄 RESET recibido - Sistema recuperado");
+          // Restaurar WiFi si estaba activo antes
+          if (AUTO_WIFI) {
+            start_wifi_server(TCP_PORT_DEFAULT);
+          }
+        } else if (up == "ON") {
+          communicationDisabled = false;
+          emergencyStop = false;
+          motoresActivos = true;
+          Serial.println("🔌 ON recibido - Sistema recuperado y energizado");
+          // Restaurar WiFi si estaba activo antes
+          if (AUTO_WIFI) {
+            start_wifi_server(TCP_PORT_DEFAULT);
+          }
+        } else {
+          Serial.println("⛔ Sistema en paro de emergencia - Solo RESET u ON permitido");
+        }
+        inputString = "";
+      } else {
+        inputString += c;
+      }
+    }
+    
+    delay(1);
+    return;
+  }
+  
+  // Comportamiento normal
+  procesarComandosRapido();
+  mantener_wifi();
+  verificarConexionWiFi();
+  update_wifi_led();
+
+  delay(1);
+}
+
+// ======================= NUEVA FUNCIÓN: PARO DE EMERGENCIA COMPLETO =======================
+void emergencyStopComplete() {
+  Serial.println("⛔⛔⛔ PARO DE EMERGENCIA ACTIVADO ⛔⛔⛔");
+  
+  // 1. Desactivar todos los motores
+  motoresActivos = false;
+  emergencyStop = true;
+  ejecutandoPickAndPlace = false;
+  primeraTrayectoriaCompletada = false;
+  
+  // 2. Parar inmediatamente todos los motores
+  for (int i = 0; i < 4; ++i) {
+    digitalWrite(stepPins[i], LOW);
+    digitalWrite(dirPins[i], LOW);
+  }
+  
+  // 3. Cortar TODAS las comunicaciones
+  communicationDisabled = true;
+  
+  // 4. Detener servidor WiFi y desconectar completamente
+  if (wifi_server_running) {
+    if (clientTCP && clientTCP.connected()) {
+      clientTCP.println("⛔ EMERGENCY STOP ACTIVATED - COMMUNICATIONS DISABLED");
+      delay(10);
+      clientTCP.stop();
+    }
+    server.stop();
+    WiFi.disconnect(true);
+    wifi_server_running = false;
+    wifi_status = WIFI_DISCONNECTED;
+    Serial.println("📡 Comunicaciones WiFi completamente detenidas");
+  }
+  
+  // 5. Cerrar la garra por seguridad
+  garra.write(posCerrada);
+  current_deg[4] = posCerrada;
+  
+  // 6. Deshabilitar Serial para comandos normales
+  Serial.println("⛔ Comunicaciones deshabilitadas - Solo RESET u ON permitido");
+  Serial.println("⛔ LED de estado parpadeando rápidamente indica PARO DE EMERGENCIA");
+  
+  // 7. Configurar LED de estado para parpadeo rápido de emergencia
+  digitalWrite(STATUS_LED, HIGH);
+  delay(100);
+  digitalWrite(STATUS_LED, LOW);
+}
+
+// ======================= FUNCIÓN AUXILIAR PARA PARSEAR COMANDO TRAY =======================
+bool parsearComandoTRAY(String cmd, float* targets, String& direcciones, int& velocidad, String& estadoGarra) {
+  // Formato: TRAY:val1,val2,val3,val4,dirs,vel,garra
+  
+  if (!cmd.startsWith("TRAY:")) {
+    Serial.println("❌ Comando TRAY inválido");
+    return false;
+  }
+  
+  // Quitar "TRAY:"
+  String params = cmd.substring(5);
+  
+  int startIndex = 0;
+  
+  // Parsear los 4 valores
+  for (int i = 0; i < 4; i++) {
+    int commaIndex = params.indexOf(',', startIndex);
+    if (commaIndex == -1) {
+      Serial.println("❌ Formato TRAY inválido - Faltan valores");
+      return false;
+    }
+    
+    String valStr = params.substring(startIndex, commaIndex);
+    targets[i] = valStr.toFloat();
+    startIndex = commaIndex + 1;
+  }
+  
+  // Leer direcciones (4 caracteres)
+  if (startIndex + 3 >= params.length()) {
+    Serial.println("❌ Formato TRAY inválido - Faltan direcciones");
+    return false;
+  }
+  
+  direcciones = params.substring(startIndex, startIndex + 4);
+  direcciones.toUpperCase();
+  startIndex += 5; // 4 caracteres + la coma
+  
+  // Leer velocidad
+  int commaIndex = params.indexOf(',', startIndex);
+  if (commaIndex != -1) {
+    String velStr = params.substring(startIndex, commaIndex);
+    velocidad = velStr.toInt();
+    
+    // Leer estado garra
+    estadoGarra = params.substring(commaIndex + 1);
+    estadoGarra.toUpperCase();
+  } else {
+    // Solo velocidad, sin garra
+    String velStr = params.substring(startIndex);
+    velocidad = velStr.toInt();
+    estadoGarra = "MANTENER";
+  }
+  
+  return true;
+}
+
+// ======================= FUNCIÓN PARA EJECUTAR TRAYECTORIA DESDE STRING =======================
+bool ejecutarTrayectoriaDesdeString(String trayCmd) {
+  float targets[4];
+  String direcciones = "";
+  int velocidad = 500;
+  String estadoGarra = "MANTENER";
+  
+  if (!parsearComandoTRAY(trayCmd, targets, direcciones, velocidad, estadoGarra)) {
+    return false;
+  }
+  
+  // Ejecutar la trayectoria
+  moverTrayectoriaCoordinada(targets, direcciones, velocidad, estadoGarra);
+  return true;
+}
+
+// ======================= FUNCIÓN SIMPLIFICADA PARA PICK-AND-PLACE =======================
+void procesarComandoPickAndPlace(String cmd) {
+  // Formato: PICKPLACE:pick_params:place_params:vel:delay:garra_accion
+  // pick_params = TRAY:val1,val2,val3,val4,dirs,vel,garra
+  // place_params = TRAY:val1,val2,val3,val4,dirs,vel,garra
+  
+  Serial.println("🤖 Iniciando secuencia PICK-AND-PLACE...");
+  
+  // Quitar "PICKPLACE:" del inicio (10 caracteres)
+  cmd = cmd.substring(10);
+  
+  // Encontrar la posición del segundo "TRAY:" 
+  int primerTrayPos = cmd.indexOf("TRAY:");
+  int segundoTrayPos = cmd.indexOf("TRAY:", primerTrayPos + 5);
+  
+  if (primerTrayPos == -1 || segundoTrayPos == -1) {
+    Serial.println("❌ Formato PICKPLACE inválido - No se encontraron dos comandos TRAY");
+    return;
+  }
+  
+  // Separar primera trayectoria (desde el primer TRAY: hasta justo antes del segundo TRAY:)
+  String primeraTray = cmd.substring(primerTrayPos, segundoTrayPos - 1);
+  
+  // El resto es: TRAY:...:vel:delay:garra_accion
+  String resto = cmd.substring(segundoTrayPos);
+  
+  // Encontrar donde termina el segundo TRAY (después de 6 comas)
+  int commaCount = 0;
+  int endSecondTray = -1;
+  
+  for (int i = 0; i < resto.length(); i++) {
+    if (resto.charAt(i) == ',') {
+      commaCount++;
+    }
+    // TRAY tiene: 4 valores + dirs + vel + garra = 6 comas
+    if (commaCount >= 6 && resto.charAt(i) == ':') {
+      endSecondTray = i;
+      break;
+    }
+  }
+  
+  if (endSecondTray == -1) {
+    Serial.println("❌ Formato PICKPLACE inválido - No se pudo encontrar fin de segunda trayectoria");
+    return;
+  }
+  
+  // Separar segunda trayectoria
+  String segundaTray = resto.substring(0, endSecondTray);
+  
+  // Parámetros finales (vel:delay:garra_accion)
+  String parametrosFinales = resto.substring(endSecondTray + 1);
+  
+  // Parsear parámetros finales
+  int firstColon = parametrosFinales.indexOf(':');
+  int secondColon = parametrosFinales.indexOf(':', firstColon + 1);
+  
+  if (firstColon == -1 || secondColon == -1) {
+    Serial.println("❌ Formato PICKPLACE inválido - Parámetros finales incorrectos");
+    return;
+  }
+  
+  String velStr = parametrosFinales.substring(0, firstColon);
+  String delayStr = parametrosFinales.substring(firstColon + 1, secondColon);
+  String garraAccion = parametrosFinales.substring(secondColon + 1);
+  
+  int velocidadGeneral = velStr.toInt();
+  float delayTime = delayStr.toFloat();
+  
+  Serial.printf("  Primera trayectoria: %s\n", primeraTray.c_str());
+  Serial.printf("  Segunda trayectoria: %s\n", segundaTray.c_str());
+  Serial.printf("  Velocidad: %d\n", velocidadGeneral);
+  Serial.printf("  Delay: %.1fs\n", delayTime);
+  Serial.printf("  Acción garra: %s\n", garraAccion.c_str());
+  
+  // Validar formato de trayectorias
+  if (!primeraTray.startsWith("TRAY:") || !segundaTray.startsWith("TRAY:")) {
+    Serial.println("❌ Formato de trayectoria inválido");
+    return;
+  }
+  
+  // Establecer que estamos ejecutando pick-and-place
+  ejecutandoPickAndPlace = true;
+  primeraTrayectoriaCompletada = false;
+  
+  // Ejecutar primera trayectoria (PICK)
+  Serial.println("🚀 Ejecutando primera trayectoria (PICK)...");
+  if (!ejecutarTrayectoriaDesdeString(primeraTray)) {
+    Serial.println("❌ Error en primera trayectoria");
+    ejecutandoPickAndPlace = false;
+    return;
+  }
+  
+  // Verificar si se completó sin emergencia
+  if (!ejecutandoPickAndPlace || emergencyStop || communicationDisabled) {
+    Serial.println("❌ Primera trayectoria interrumpida por emergencia");
+    ejecutandoPickAndPlace = false;
+    return;
+  }
+  
+  primeraTrayectoriaCompletada = true;
+  Serial.println("✅ Primera trayectoria completada");
+  
+  // Acción de garra intermedia
+  if (garraAccion != "NO CAMBIAR") {
+    Serial.printf("🔧 Ejecutando acción de garra: %s\n", garraAccion.c_str());
+    if (garraAccion == "CERRAR") {
+      garra.write(posCerrada);
+      current_deg[4] = posCerrada;
+    } else if (garraAccion == "ABRIR") {
+      garra.write(posAbierta);
+      current_deg[4] = posAbierta;
+    }
+    delay(500);
+  }
+  
+  // Delay entre movimientos
+  if (delayTime > 0) {
+    Serial.printf("⏳ Esperando %.1f segundos...\n", delayTime);
+    delay((unsigned long)(delayTime * 1000));
+  }
+  
+  // 🔥 PUNTO CRÍTICO: ESTABLECER SISTEMA EN CERO
+  Serial.println("🎯 ESTABLECIENDO SISTEMA EN CERO para segunda trayectoria...");
+  setZeroReference();  // Establece posición actual como nuevo cero
+  
+  // RESETEAR las posiciones actuales a 0
+  for (int i = 0; i < 4; i++) {
+    current_deg[i] = 0.0;
+  }
+  
+  // La garra mantiene su posición actual
+  
+  // Ejecutar segunda trayectoria desde el nuevo cero
+  Serial.println("🚀 Ejecutando segunda trayectoria (PLACE) desde posición cero...");
+  if (!ejecutarTrayectoriaDesdeString(segundaTray)) {
+    Serial.println("❌ Error en segunda trayectoria");
+  }
+  
+  // Finalizar secuencia
+  ejecutandoPickAndPlace = false;
+  primeraTrayectoriaCompletada = false;
+  
+  Serial.println("✅ Secuencia PICK-AND-PLACE completada exitosamente!");
+}
+
+// ======================= FUNCIÓN TRAYECTORIA COORDINADA MEJORADA =======================
+void moverTrayectoriaCoordinada(float target_deg[4], String direcciones, int velocidad, String estadoGarra, bool esSegundaTrayectoria) {
+    if (!motoresActivos || emergencyStop || communicationDisabled) {
+        Serial.println("⚠️ Motores no energizados, E-STOP activado o comunicaciones deshabilitadas");
+        commandInProgress = false;
+        return;
+    }
+    
+    // Verificar si está en paro de emergencia
+    if (communicationDisabled) {
+      Serial.println("⛔ Sistema en paro de emergencia - Comando rechazado");
+      commandInProgress = false;
+      return;
+    }
+    
+    if (esSegundaTrayectoria) {
+        Serial.println("🎯 Iniciando segunda trayectoria desde posición cero...");
+    } else {
+        Serial.println("🎯 Iniciando trayectoria coordinada...");
+    }
+    
+    // Para la segunda trayectoria, ya estamos en posición cero absoluta
+    float absolute_targets[4];
+    for (int i = 0; i < 4; i++) {
+        if (esSegundaTrayectoria) {
+            // Para la segunda trayectoria, el target es la posición absoluta
+            absolute_targets[i] = target_deg[i];
+            
+            // Asegurarse de que esté en rango 0-360
+            while (absolute_targets[i] < 0.0) absolute_targets[i] += 360.0;
+            while (absolute_targets[i] >= 360.0) absolute_targets[i] -= 360.0;
+        } else {
+            // Para la primera trayectoria, usar el sistema normal
+            absolute_targets[i] = zero_reference[i] + target_deg[i];
+            
+            // Normalizar a 0-360
+            while (absolute_targets[i] >= 360.0) absolute_targets[i] -= 360.0;
+            while (absolute_targets[i] < 0.0) absolute_targets[i] += 360.0;
+        }
+        
+        if (esSegundaTrayectoria) {
+            Serial.printf("  M%d: Target=%.1f° (Actual=%.1f°, Dir=%c)\n", 
+                          i+1, absolute_targets[i], current_deg[i], direcciones.charAt(i));
+        } else {
+            Serial.printf("  M%d: Virtual=%.1f° -> Absoluto=%.1f° (Actual=%.1f°, Dir=%c)\n", 
+                          i+1, target_deg[i], absolute_targets[i], current_deg[i], direcciones.charAt(i));
+        }
+    }
+    
+    Serial.printf("  Direcciones: %s, Velocidad: %d, Garra: %s\n", 
+                  direcciones.c_str(), velocidad, estadoGarra.c_str());
+    
+    // MOVIMIENTO COORDINADO DE MOTORES
+    bool movimientoCompletado = true;
+    
+    // Calcular pasos para cada motor según dirección especificada
+    long pasosMotor[4];
+    bool sentidos[4];
+    bool motorActivo[4] = {false, false, false, false};
+    
+    for (int i = 0; i < 4; i++) {
+        // VERIFICACIÓN: Solo mover si el valor es diferente de 0
+        if (abs(target_deg[i]) >= 0.5) {
+            motorActivo[i] = true;
+            char dirChar = direcciones.charAt(i);
+            bool sentido = (dirChar == 'H'); // H=Horario, A=Antihorario
+
+            // Calcular delta teniendo en cuenta el camino más corto
+            float delta = absolute_targets[i] - current_deg[i];
+            
+            // Encontrar el camino más corto (puede ser negativo)
+            if (delta > 180.0) delta -= 360.0;
+            if (delta < -180.0) delta += 360.0;
+            
+            // Ajustar según dirección especificada
+            if (!sentido) {
+                // Si se especifica antihorario, invertir delta si es positivo
+                delta = -abs(delta);  // Siempre negativo para antihorario
+            } else {
+                // Si se especifica horario, hacer delta positivo
+                delta = abs(delta);   // Siempre positivo para horario
+            }
+            
+            // Asegurar que delta no sea 0
+            if (abs(delta) < 0.5) {
+                motorActivo[i] = false;
+                pasosMotor[i] = 0;
+                Serial.printf("  M%d: Delta muy pequeño (%.1f°) - OMITIDO\n", i+1, delta);
+                continue;
+            }
+            
+            pasosMotor[i] = (long)round(abs(delta) * PASOS_POR_GRADO);
+            sentidos[i] = (delta > 0);  // true = horario, false = antihorario
+            
+            Serial.printf("  M%d: %.1f° -> %.1f° (delta=%.1f°, %s, %ld pasos)\n", 
+                          i+1, current_deg[i], absolute_targets[i], delta, 
+                          sentidos[i] ? "HORARIO" : "ANTIHORARIO", pasosMotor[i]);
+        } else {
+            // Valor 0 o fuera de rango - no mover este motor
+            motorActivo[i] = false;
+            pasosMotor[i] = 0;
+            Serial.printf("  M%d: OMITIDO (valor=%.1f°)\n", i+1, target_deg[i]);
+        }
+    }
+    
+    // Preparar dirección para motores activos
+    for (int i = 0; i < 4; i++) {
+        if (motorActivo[i]) {
+            digitalWrite(dirPins[i], sentidos[i] ? HIGH : LOW);
+        }
+    }
+    delayMicroseconds(100);
+    
+    // Calcular pasos máximos necesarios entre motores activos
+    long maxPasos = 0;
+    for (int i = 0; i < 4; i++) {
+        if (motorActivo[i] && pasosMotor[i] > maxPasos) {
+            maxPasos = pasosMotor[i];
+        }
+    }
+    
+    if (maxPasos == 0) {
+        if (esSegundaTrayectoria) {
+            Serial.println("⚠️ No hay movimiento necesario en la segunda trayectoria");
+        } else {
+            Serial.println("⚠️ No hay movimiento necesario en los motores (todos en 0 o sin cambios)");
+        }
+    } else {
+        // Configurar velocidad
+        int delayMicros = map(velocidad, 1, 1000, 1200, 200);
+        delayMicros = constrain(delayMicros, 200, 1200);
+        
+        // Ejecutar movimiento coordinado SOLO para motores activos
+        for (long stepCount = 0; stepCount < maxPasos; stepCount++) {
+            for (int i = 0; i < 4; i++) {
+                if (motorActivo[i] && stepCount < pasosMotor[i]) {
+                    digitalWrite(stepPins[i], HIGH);
+                }
+            }
+            delayMicroseconds(delayMicros);
+            
+            for (int i = 0; i < 4; i++) {
+                if (motorActivo[i] && stepCount < pasosMotor[i]) {
+                    digitalWrite(stepPins[i], LOW);
+                }
+            }
+            delayMicroseconds(delayMicros);
+            
+            // Verificar E-STOP
+            if (emergencyStop || communicationDisabled) {
+                Serial.println("⛔ E-STOP activado durante trayectoria");
+                movimientoCompletado = false;
+                break;
+            }
+        }
+    }
+    
+    // Actualizar posiciones actuales solo para motores que se movieron
+    if (movimientoCompletado) {
+        for (int i = 0; i < 4; i++) {
+            if (motorActivo[i]) {
+                current_deg[i] = absolute_targets[i];
+                // Normalizar
+                while (current_deg[i] >= 360.0) current_deg[i] -= 360.0;
+                while (current_deg[i] < 0.0) current_deg[i] += 360.0;
+                
+                // Mostrar ángulo
+                if (esSegundaTrayectoria) {
+                    Serial.printf("  M%d: Posición actual=%.1f°\n", i+1, current_deg[i]);
+                } else {
+                    float virtual_angle = getVirtualAngle(i);
+                    Serial.printf("  M%d: Posición actual=%.1f°, Virtual=%.1f°\n", 
+                                  i+1, current_deg[i], virtual_angle);
+                }
+            }
+        }
+        if (esSegundaTrayectoria) {
+            Serial.println("✅ Segunda trayectoria completada");
+        } else {
+            Serial.println("✅ Movimiento de motores coordinado completado");
+        }
+    } else {
+        if (esSegundaTrayectoria) {
+            Serial.println("❌ Segunda trayectoria interrumpida");
+        } else {
+            Serial.println("❌ Trayectoria interrumpida");
+        }
+    }
+    
+    // CONTROL DE GARRA
+    if (estadoGarra == "CERRAR") {
+        garra.write(posCerrada);
+        current_deg[4] = posCerrada;
+        Serial.println("🔒 Garra cerrada");
+    } else if (estadoGarra == "ABRIR") {
+        garra.write(posAbierta);
+        current_deg[4] = posAbierta;
+        Serial.println("🔓 Garra abierta");
+    }
+    
+    commandInProgress = false;
+}
+
+// OPTIMIZACIÓN: Procesador de comandos más rápido CORREGIDO
+void procesarComandoRapido(String cmd) {
+  cmd.trim();
+  if (cmd.length() == 0) return;
+  
+  // Si las comunicaciones están deshabilitadas, solo permitir RESET u ON
+  if (communicationDisabled) {
+    String up = cmd;
+    up.toUpperCase();
+    
+    if (up == "RESET") {
+      communicationDisabled = false;
+      emergencyStop = false;
+      ejecutandoPickAndPlace = false;
+      primeraTrayectoriaCompletada = false;
+      
+      // Restaurar posiciones y cero de referencia
+      for (int i = 0; i < 4; ++i) {
+        current_deg[i] = 0;
+        zero_reference[i] = 0;
+      }
+      garra.write(posAbierta);
+      current_deg[4] = posAbierta;
+      
+      Serial.println("🔄 RESET completado - Sistema y cero referencia reiniciados");
+      
+      // Reconectar WiFi si estaba activo antes
+      if (AUTO_WIFI) {
+        start_wifi_server(TCP_PORT_DEFAULT);
+      }
+    } else if (up == "ON") {
+      communicationDisabled = false;
+      emergencyStop = false;
+      ejecutandoPickAndPlace = false;
+      primeraTrayectoriaCompletada = false;
+      motoresActivos = true;
+      Serial.println("🔌 ON recibido - Sistema recuperado y energizado");
+      
+      // Reconectar WiFi si estaba activo antes
+      if (AUTO_WIFI) {
+        start_wifi_server(TCP_PORT_DEFAULT);
+      }
+    } else if (up == "ZERO" || up == "SETZERO") {
+      // Permitir establecer cero incluso en emergencia (para recuperación)
+      setZeroReference();
+    } else {
+      Serial.println("⛔ Sistema en paro de emergencia - Solo RESET, ON o ZERO permitido");
+    }
+    return;
+  }
+  
+  lastCommandTime = millis();
+  commandInProgress = true;
+
+  String up = cmd;
+  up.toUpperCase();
+
+  // Comandos INMEDIATOS (sin procesamiento complejo)
+  if (up == "ON") {
+    emergencyStop = false;
+    communicationDisabled = false;
+    ejecutandoPickAndPlace = false;
+    primeraTrayectoriaCompletada = false;
+    motoresActivos = true;
+    Serial.println("🔌 Motores energizados.");
+    commandInProgress = false;
+    return;
+  }
+  
+  if (up == "OFF") {
+    motoresActivos = false;
+    ejecutandoPickAndPlace = false;
+    primeraTrayectoriaCompletada = false;
+    Serial.println("⚙️ Motores apagados.");
+    commandInProgress = false;
+    return;
+  }
+  
+  if (up == "ABRIR") {
+    if (motoresActivos && !emergencyStop && !communicationDisabled) {
+      garra.write(posAbierta);
+      current_deg[4] = posAbierta;
+      Serial.println("🟢 Garra abierta");
+    } else Serial.println("⚠️ No energizado, E-STOP o comunicaciones deshabilitadas.");
+    commandInProgress = false;
+    return;
+  }
+  
+  if (up == "CERRAR") {
+    if (motoresActivos && !emergencyStop && !communicationDisabled) {
+      garra.write(posCerrada);
+      current_deg[4] = posCerrada;
+      Serial.println("🔴 Garra cerrada");
+    } else Serial.println("⚠️ No energizado, E-STOP o comunicaciones deshabilitadas.");
+    commandInProgress = false;
+    return;
+  }
+  
+  // NUEVO COMANDO: Establecer cero de referencia
+  if (up == "ZERO" || up == "SETZERO") {
+    setZeroReference();
+    
+    // Mostrar ángulos virtuales actuales
+    Serial.println("🎯 Cero de referencia establecido. Ángulos virtuales actuales:");
+    for (int i = 0; i < 4; i++) {
+      Serial.printf("  M%d: Virtual=%.1f°, Absoluto=%.1f°\n", 
+                    i+1, getVirtualAngle(i), current_deg[i]);
+    }
+    
+    commandInProgress = false;
+    return;
+  }
+  
+  // NUEVO COMANDO: Mostrar estado actual
+  if (up == "STATUS" || up == "POS") {
+    Serial.println("📊 Estado actual de los motores:");
+    for (int i = 0; i < 4; i++) {
+      float virtual_angle = getVirtualAngle(i);
+      Serial.printf("  M%d: Absoluto=%.1f°, Virtual=%.1f°, Referencia=%.1f°\n", 
+                    i+1, current_deg[i], virtual_angle, zero_reference[i]);
+    }
+    Serial.printf("  Garra: %d°\n", (int)current_deg[4]);
+    
+    commandInProgress = false;
+    return;
+  }
+  
+  // PARO DE EMERGENCIA COMPLETO
+  if (up == "STOP" || up == "ESTOP" || up == "E-STOP" || up == "EMERGENCY") {
+    emergencyStopComplete();
+    commandInProgress = false;
+    return;
+  }
+
+  if (up == "RESET") {
+    emergencyStop = false;
+    communicationDisabled = false;
+    ejecutandoPickAndPlace = false;
+    primeraTrayectoriaCompletada = false;
+    motoresActivos = false;
+    
+    // Reiniciar posiciones absolutas y cero de referencia
+    for (int i = 0; i < 4; ++i) {
+      current_deg[i] = 0;
+      zero_reference[i] = 0;
+    }
+    garra.write(posAbierta);
+    current_deg[4] = posAbierta;
+    
+    Serial.println("🔄 RESET completado - Sistema y cero referencia reiniciados");
+    
+    // Restaurar WiFi si estaba activo
+    if (AUTO_WIFI) {
+      start_wifi_server(TCP_PORT_DEFAULT);
+    }
+    
+    commandInProgress = false;
+    return;
+  }
+
+  // NUEVO COMANDO: PICK-AND-PLACE (secuencia combinada)
+  if (up.startsWith("PICKPLACE:")) {
+    // Verificar si las comunicaciones están activas
+    if (communicationDisabled) {
+      Serial.println("⛔ Comunicaciones deshabilitadas - Comando rechazado");
+      commandInProgress = false;
+      return;
+    }
+    
+    // Procesar comando pick-and-place
+    procesarComandoPickAndPlace(cmd);
+    commandInProgress = false;
+    return;
+  }
+
+  if (up.startsWith("TRAY:")) {
+    // Verificar si las comunicaciones están activas
+    if (communicationDisabled) {
+      Serial.println("⛔ Comunicaciones deshabilitadas - Comando rechazado");
+      commandInProgress = false;
+      return;
+    }
+    
+    // Parsear y ejecutar trayectoria simple
+    ejecutarTrayectoriaDesdeString(cmd);
+    commandInProgress = false;
+    return;
+  }
+
+  // Comandos que requieren movimiento (los procesamos normalmente)
+  if (up.startsWith("M")) {
+    if (!communicationDisabled) {
+      procesarComando(cmd);
+    } else {
+      Serial.println("⛔ Comunicaciones deshabilitadas - Comando rechazado");
+      commandInProgress = false;
+    }
+  } else if (up.startsWith("POS:")) {
+    // NUEVO: Comando POS para mover a posición absoluta
+    procesarComando(cmd);
+  } else if (up.startsWith("MODE:")) {
+    procesarComando(cmd);
+  } else {
+    Serial.printf("📨 Comando desconocido: %s\n", cmd.c_str());
+    commandInProgress = false;
+  }
+}
+
+void procesarComandosRapido() {
+  // Leer todo el buffer serial disponible de una vez
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    inputString += c;
+    
+    // Procesar inmediatamente si tenemos comando completo
+    if (c == '\n' || c == '\r') {
+      String line = inputString;
+      line.trim();
+      if (line.length() > 0) {
+        procesarComandoRapido(line);
+      }
+      inputString = "";
+    }
+  }
+  
+  // OPTIMIZACIÓN: Procesar comandos TCP también rápidos
+  // Solo si las comunicaciones no están deshabilitadas
+  if (!communicationDisabled && wifi_server_running) {
+    if (!clientTCP || !clientTCP.connected()) {
+      WiFiClient candidate = server.available();
+      if (candidate && candidate.connected()) {
+        clientTCP = candidate;
+        Serial.println("🌐 Cliente TCP conectado.");
+      }
+    }
+
+    if (clientTCP && clientTCP.connected() && clientTCP.available()) {
+      String cmd = clientTCP.readStringUntil('\n');
+      cmd.trim();
+      if (cmd.length() > 0) {
+        Serial.printf("🌐 [WiFi] Recibido: %s\n", cmd.c_str());
+        procesarComandoRapido(cmd);
+        if (!communicationDisabled) {
+          clientTCP.println("OK: " + cmd);
+        }
+      }
+    }
+  }
+}
+
+// ======================= FUNCIONES RESTANTES (IGUALES PERO ACTUALIZADAS) =======================
+
+void verificarConexionWiFi() {
+  if (communicationDisabled) return;
+  
+  if (millis() - lastWifiCheck > WIFI_CHECK_INTERVAL) {
+    if (WiFi.status() != WL_CONNECTED && wifi_status != WIFI_DISCONNECTED) {
+      Serial.println("⚠️ WiFi desconectado. Intentando reconectar...");
+      wifi_status = WIFI_DISCONNECTED;
+      if (AUTO_WIFI) {
+        start_wifi_server(TCP_PORT_DEFAULT);
+      }
+    } else if (WiFi.status() == WL_CONNECTED && wifi_status == WIFI_DISCONNECTED) {
+      Serial.println("✅ WiFi reconectado!");
+      wifi_status = WIFI_CONNECTED;
+    }
+    lastWifiCheck = millis();
+  }
+}
+
+void actualizarEstadoWiFi() {
+  if (WiFi.status() == WL_CONNECTED) {
+    wifi_status = WIFI_CONNECTED;
+  } else {
+    wifi_status = WIFI_DISCONNECTED;
+  }
+}
+
+void update_wifi_led() {
+  if (communicationDisabled) {
+    unsigned long now = millis();
+    if (now - ledLastToggle >= 100) {
+      digitalWrite(STATUS_LED, !digitalRead(STATUS_LED));
+      digitalWrite(WIFI_LED, !digitalRead(WIFI_LED));
+      ledLastToggle = now;
+    }
+    return;
+  }
+  
+  unsigned long now = millis();
+  
+  switch(wifi_status) {
+    case WIFI_DISCONNECTED:
+      if (now - ledLastToggle >= 250) {
+        ledState = !ledState;
+        digitalWrite(WIFI_LED, ledState);
+        ledLastToggle = now;
+      }
+      digitalWrite(STATUS_LED, LOW);
+      break;
+      
+    case WIFI_CONNECTING:
+      if (now - ledLastToggle >= 500) {
+        ledState = !ledState;
+        digitalWrite(WIFI_LED, ledState);
+        ledLastToggle = now;
+      }
+      digitalWrite(STATUS_LED, LOW);
+      break;
+      
+    case WIFI_CONNECTED:
+      if (!ledState) {
+        digitalWrite(WIFI_LED, HIGH);
+        ledState = HIGH;
+      }
+      digitalWrite(STATUS_LED, HIGH);
+      break;
+  }
+}
+
+void start_wifi_server(uint16_t port) {
+  if (communicationDisabled) {
+    Serial.println("⛔ No se puede iniciar WiFi - Sistema en paro de emergencia");
+    return;
+  }
+  
+  if (wifi_server_running) {
+    Serial.println("🟢 Wi-Fi server ya corriendo.");
+    return;
+  }
+
+  Serial.printf("🔌 Intentando conectar Wi-Fi a '%s' ...\n", ssid);
+  wifi_connecting = true;
+  wifi_status = WIFI_CONNECTING;
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+
+  unsigned long start = millis();
+  const unsigned long timeout = 10000;
+  
+  while (WiFi.status() != WL_CONNECTED && millis() - start < timeout) {
+    delay(300);
+    Serial.print(".");
+  }
+
+  wifi_connecting = false;
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n✅ Conectado al Wi-Fi!");
+    Serial.print("📡 IP local: "); Serial.println(WiFi.localIP());
+    Serial.print("📶 Señal WiFi: ");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
+    
+    server.begin(port);
+    wifi_server_running = true;
+    wifi_status = WIFI_CONNECTED;
+    Serial.printf("🟢 Servidor TCP activo en puerto %d\n", port);
+    Serial.println("🌐 Listo para conexiones TCP");
+    
+  } else {
+    Serial.println("\n❌ No se pudo conectar al Wi-Fi.");
+    wifi_server_running = false;
+    wifi_status = WIFI_DISCONNECTED;
+    WiFi.disconnect(true);
+  }
+}
+
+void stop_wifi_server_complete() {
+  if (!wifi_server_running && WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+  
+  if (clientTCP && clientTCP.connected()) {
+    clientTCP.stop();
+    delay(10);
+  }
+  
+  server.stop();
+  delay(10);
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  delay(10);
+  
+  wifi_server_running = false;
+  wifi_connecting = false;
+  wifi_status = WIFI_DISCONNECTED;
+}
+
+void mantener_wifi() {
+  if (communicationDisabled) return;
+  
+  if (AUTO_WIFI && !wifi_server_running) {
+    if (WiFi.status() != WL_CONNECTED && !wifi_connecting) {
+      static unsigned long lastTry = 0;
+      if (millis() - lastTry > 12000) {
+        Serial.println("🔄 AUTO_WIFI: intentando reconectar...");
+        start_wifi_server(TCP_PORT_DEFAULT);
+        lastTry = millis();
+      }
+    }
+  }
+}
+
+// ======================= COMANDOS DE MOVIMIENTO ACTUALIZADOS =======================
+void procesarComando(String cmd) {
+  cmd.trim();
+  if (cmd.length() == 0) return;
+  
+  if (communicationDisabled) {
+    Serial.println("⛔ Sistema en paro de emergencia - Comando rechazado");
+    commandInProgress = false;
+    return;
+  }
+
+  String up = cmd;
+  up.toUpperCase();
+
+  // MODE handlers
+  if (up.startsWith("MODE:WIFI")) {
+    Serial.println("📡 Petición: MODE:WIFI");
+    if (!communicationDisabled) {
+      start_wifi_server(TCP_PORT_DEFAULT);
+    }
+    commandInProgress = false;
+    return;
+  }
+  
+  if (up.startsWith("MODE:SERIAL")) {
+    Serial.println("🔌 Petición: MODE:SERIAL");
+    if (!communicationDisabled) {
+      stop_wifi_server_complete();
+    }
+    commandInProgress = false;
+    return;
+  }
+
+  // NUEVO: Comando POS para posición absoluta
+  if (up.startsWith("POS:")) {
+    // Formato: POS:10,-10,20,-20,vel
+    int start = 4;
+    std::vector<float> targets;
+    
+    int lastIndex = start;
+    for (int i = 0; i < 4; i++) {
+        int nextComma = cmd.indexOf(',', lastIndex);
+        if (nextComma == -1 && i < 3) {
+            Serial.println("❌ Formato POS inválido.");
+            commandInProgress = false;
+            return;
+        }
+        
+        if (nextComma != -1 || i == 3) {
+            String valStr;
+            if (i == 3 && nextComma == -1) {
+                // Último valor con velocidad
+                int velComma = cmd.indexOf(',', lastIndex);
+                if (velComma != -1) {
+                    valStr = cmd.substring(lastIndex, velComma);
+                    lastIndex = velComma + 1;
+                } else {
+                    valStr = cmd.substring(lastIndex);
+                }
+            } else {
+                valStr = cmd.substring(lastIndex, nextComma);
+                lastIndex = nextComma + 1;
+            }
+            targets.push_back(valStr.toFloat());
+        }
+    }
+    
+    // Leer velocidad (si existe)
+    int velocidad = 500;
+    if (lastIndex < cmd.length()) {
+        velocidad = cmd.substring(lastIndex).toInt();
+    }
+    
+    if (targets.size() >= 4) {
+        Serial.println("🎯 Moviendo a posición absoluta:");
+        for (int i = 0; i < 4; i++) {
+            // Los valores son ángulos VIRTUALES
+            float absolute_target = zero_reference[i] + targets[i];
+            while (absolute_target >= 360.0) absolute_target -= 360.0;
+            while (absolute_target < 0.0) absolute_target += 360.0;
+            
+            Serial.printf("  M%d: Virtual=%.1f° -> Absoluto=%.1f°\n", 
+                          i+1, targets[i], absolute_target);
+        }
+        
+        // Usar trayectoria coordinada con direcciones automáticas
+        // Calcular direcciones óptimas
+        String direcciones = "";
+        for (int i = 0; i < 4; i++) {
+            if (abs(targets[i]) < 0.5) {
+                direcciones += "H"; // No importa, no se moverá
+            } else if (targets[i] > 0) {
+                direcciones += "H"; // Positivo = horario
+            } else {
+                direcciones += "A"; // Negativo = antihorario
+            }
+        }
+        
+        moverTrayectoriaCoordinada(targets.data(), direcciones, velocidad, "MANTENER", false);
+    }
+    commandInProgress = false;
+    return;
+  }
+
+  // Motor direct command: M#,DIR,pasos,vel
+  if (up.startsWith("M")) {
+    int idx1 = cmd.indexOf(',');
+    int idx2 = cmd.indexOf(',', idx1 + 1);
+    int idx3 = cmd.indexOf(',', idx2 + 1);
+    if (idx1 == -1 || idx2 == -1 || idx3 == -1) {
+      Serial.println("❌ Formato inválido (M#,...).");
+      commandInProgress = false;
+      return;
+    }
+    int motor = cmd.substring(1, idx1).toInt() - 1;
+    String direccion = cmd.substring(idx1 + 1, idx2);
+    int pasos = cmd.substring(idx2 + 1, idx3).toInt();
+    int velocidad = cmd.substring(idx3 + 1).toInt();
+    if (motor >= 0 && motor < 4) {
+      if (motoresActivos && !emergencyStop && !communicationDisabled) {
+        bool sentidoHorario = (direccion == "H");
+        moverMotorPasos(motor, pasos, sentidoHorario, velocidad);
+        
+        // Calcular grados movidos
+        float grados_movidos = ((float)pasos / PASOS_POR_REVOLUCION) * 360.0;
+        if (!sentidoHorario) grados_movidos = -grados_movidos;
+        
+        // Actualizar posición absoluta
+        current_deg[motor] += grados_movidos;
+        while (current_deg[motor] >= 360.0) current_deg[motor] -= 360.0;
+        while (current_deg[motor] < 0.0) current_deg[motor] += 360.0;
+        
+        // Mostrar ángulo virtual
+        float virtual_angle = getVirtualAngle(motor);
+        Serial.printf("✅ Motor %d movido %.1f° (Absoluto=%.1f°, Virtual=%.1f°, vel=%d)\n", 
+                      motor+1, grados_movidos, current_deg[motor], virtual_angle, velocidad);
+      } else Serial.println("⚠️ No energizado, E-STOP o comunicaciones deshabilitadas.");
+    } else Serial.println("❌ Motor fuera de rango.");
+    commandInProgress = false;
+    return;
+  }
+
+  Serial.printf("📨 Comando desconocido: %s\n", cmd.c_str());
+  commandInProgress = false;
+}
+
+// ======================= MOVIMIENTOS OPTIMIZADOS =======================
+long grados_a_pasos(float grados) {
+  float pasos = grados * PASOS_POR_GRADO;
+  return (long)round(abs(pasos));
+}
+
+void moverMotorPasos(int motor, long pasos, bool sentidoHorario, int velocidad) {
+  if (motor < 0 || motor > 3) return;
+  if (pasos <= 0) return;
+  
+  if (communicationDisabled) {
+    Serial.println("⛔ Comunicaciones deshabilitadas - Movimiento cancelado");
+    return;
+  }
+  
+  digitalWrite(dirPins[motor], sentidoHorario ? HIGH : LOW);
+  delayMicroseconds(100);
+  
+  int delayMicros = map(velocidad, 1, 1000, 1200, 200);
+  delayMicros = constrain(delayMicros, 200, 1200);
+  
+  for (long i=0; i<pasos; i++) {
+    digitalWrite(stepPins[motor], HIGH);
+    delayMicroseconds(delayMicros);
+    digitalWrite(stepPins[motor], LOW);
+    delayMicroseconds(delayMicros);
+    if (emergencyStop || communicationDisabled) {
+      Serial.println("⛔ E-STOP o comunicaciones deshabilitadas detectadas. Parando motor.");
+      commandInProgress = false;
+      return;
+    }
+  }
+  commandInProgress = false;
+}
+
+void moverMotorPorDeltaDeg(int motor, float delta_deg, int velocidad) {
+  if (motor < 0 || motor > 3) return;
+  if (abs(delta_deg) < 0.5) return;
+  
+  if (communicationDisabled) {
+    Serial.println("⛔ Comunicaciones deshabilitadas - Movimiento cancelado");
+    return;
+  }
+  
+  bool sentidoHorario = (delta_deg > 0);
+  long pasos = grados_a_pasos(abs(delta_deg));
+  moverMotorPasos(motor, pasos, sentidoHorario, velocidad);
+  
+  // Actualizar posición absoluta
+  current_deg[motor] += delta_deg;
+  while (current_deg[motor] >= 360.0) current_deg[motor] -= 360.0;
+  while (current_deg[motor] < 0.0) current_deg[motor] += 360.0;
+}
+
+void moverMotorSecuencialDesdePos(float target_deg[5], int velocidad) {
+  if (communicationDisabled) {
+    Serial.println("⛔ Comunicaciones deshabilitadas - Movimiento cancelado");
+    commandInProgress = false;
+    return;
+  }
+  
+  Serial.println("➡ Movimiento secuencial desde posición...");
+  for (int m=0; m<4; m++) {
+    // Convertir target virtual a absoluto
+    float absolute_target = zero_reference[m] + target_deg[m];
+    while (absolute_target >= 360.0) absolute_target -= 360.0;
+    while (absolute_target < 0.0) absolute_target += 360.0;
+    
+    float delta = absolute_target - current_deg[m];
+    while (delta > 180.0) delta -= 360.0;
+    while (delta < -180.0) delta += 360.0;
+    
+    if (abs(delta) >= 0.5) {
+      Serial.printf("➡️ M%d: delta=%.2f° -> %ld pasos\n", m+1, delta, grados_a_pasos(abs(delta)));
+      moverMotorPorDeltaDeg(m, delta, velocidad);
+      if (emergencyStop || communicationDisabled) {
+        Serial.println("⛔ E-STOP o comunicaciones deshabilitadas activadas, abortando.");
+        commandInProgress = false;
+        return;
+      }
+      delay(80);
+    }
+  }
+
+  if (target_deg[4] <= 50.0) {
+    garra.write(posCerrada);
+    current_deg[4] = posCerrada;
+    Serial.println("🔐 Garra cerrada");
+  } else {
+    garra.write(posAbierta);
+    current_deg[4] = posAbierta;
+    Serial.println("🔓 Garra abierta");
+  }
+
+  Serial.println("✅ Movimiento secuencial completo.");
+  commandInProgress = false;
+}
