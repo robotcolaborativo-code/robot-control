@@ -34,7 +34,7 @@ class CobotApp(ctk.CTk):
         self.zero_set = False
         self.current_virtual_pos = [0.0, 0.0, 0.0, 0.0]
         
-        # NUEVO: Control de ejecución en bucle
+        # Control de ejecución en bucle
         self.ejecutando_bucle = False
         self.bucle_thread = None
         self.repeticiones_bucle = 1
@@ -179,7 +179,7 @@ class CobotApp(ctk.CTk):
         ctk.CTkButton(power_frame, text="⚙️ APAGAR (OFF)", fg_color="#d32f2f", 
                      command=lambda: self.send_command("OFF"), height=45).pack(side="left", padx=5, fill="x", expand=True)
 
-        # NUEVO: Botón para establecer cero de referencia
+        # Botón para establecer cero de referencia
         zero_frame = ctk.CTkFrame(left)
         zero_frame.pack(pady=10, fill="x", padx=10)
         
@@ -219,7 +219,7 @@ class CobotApp(ctk.CTk):
         self.emergency_label = ctk.CTkLabel(status_frame, text="", font=("Arial", 12, "bold"))
         self.emergency_label.pack(pady=5)
         
-        # NUEVO: Indicador de ejecución en bucle
+        # Indicador de ejecución en bucle
         self.bucle_label = ctk.CTkLabel(status_frame, text="", font=("Arial", 12))
         self.bucle_label.pack(pady=5)
 
@@ -333,7 +333,7 @@ class CobotApp(ctk.CTk):
         garra_menu = ctk.CTkOptionMenu(config_frame, variable=self.tray_garra_var, values=["ABRIR", "CERRAR"], width=100)
         garra_menu.pack(side="left", padx=5)
 
-        # NUEVO: Control de ejecución en bucle
+        # Control de ejecución en bucle
         bucle_frame = ctk.CTkFrame(tray_scroll_frame)
         bucle_frame.pack(pady=10, padx=20, fill="x")
         
@@ -352,7 +352,7 @@ class CobotApp(ctk.CTk):
         self.bucle_delay.insert(0, "1.0")
         self.bucle_delay.pack(side="left", padx=5)
         
-        # Botones de ejecución (NUEVOS: ahora con opción de bucle)
+        # Botones de ejecución (ahora con opción de bucle)
         ejecutar_frame = ctk.CTkFrame(tray_scroll_frame)
         ejecutar_frame.pack(pady=10)
 
@@ -468,7 +468,7 @@ class CobotApp(ctk.CTk):
         
         ctk.CTkLabel(selection_frame, text="Trayectorias Guardadas:", font=("Arial",12)).pack(pady=5)
         
-        # Dropdown trayectorias guardadas - CREARLO AQUÍ
+        # Dropdown trayectorias guardadas 
         tray_keys = list(self.trayectorias.keys()) or ["Inicio"]
         self.tray_menu = ctk.CTkOptionMenu(selection_frame, variable=self.tray_var, 
                                           values=tray_keys, width=300, height=35,
@@ -520,7 +520,7 @@ class CobotApp(ctk.CTk):
         self.update_bucle_display()
         self.update_trayectorias_info()
 
-    # ==================== NUEVAS FUNCIONES MEJORADAS PARA PICK-AND-PLACE ====================
+    # ==================== FUNCIONES MEJORADAS PARA PICK-AND-PLACE ====================
     
     def construir_comando_pickplace(self, pick_tray, place_tray, delay, garra_accion):
         """Construir comando PICKPLACE correctamente formateado"""
@@ -584,7 +584,7 @@ class CobotApp(ctk.CTk):
             self.log(f"❌ Error en secuencia: {e}")
             return False
     
-    # ==================== FUNCIONES CORREGIDAS PARA EJECUCIÓN EN BUCLE ====================
+    # ==================== FUNCIONES PARA EJECUCIÓN EN BUCLE ====================
     
     def ejecutar_trayectoria_bucle(self):
         """Ejecutar trayectoria en bucle repetitivo"""
