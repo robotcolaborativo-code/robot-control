@@ -47,7 +47,7 @@ bool communicationDisabled = false;
 float current_deg[5] = {0,0,0,0,0};
 float zero_reference[4] = {0,0,0,0};  // Cero de referencia virtual
 
-// TIMING OPTIMIZADO - MÁS RÁPIDO
+// TIMING OPTIMIZADO 
 bool ledState = LOW;
 unsigned long ledLastToggle = 0;
 const unsigned long LED_BLINK_MS = 300;
@@ -115,7 +115,7 @@ void setup() {
   }
 }
 
-// ======================= NUEVAS FUNCIONES PARA SISTEMA DE COORDENADAS =======================
+// ======================= FUNCIONES PARA SISTEMA DE COORDENADAS =======================
 
 float normalizeAngle(float angle) {
   // Normalizar ángulo a rango -180 a 180
@@ -200,7 +200,7 @@ void loop() {
   delay(1);
 }
 
-// ======================= NUEVA FUNCIÓN: PARO DE EMERGENCIA COMPLETO =======================
+// ======================= FUNCIÓN: PARO DE EMERGENCIA COMPLETO =======================
 void emergencyStopComplete() {
   Serial.println("⛔⛔⛔ PARO DE EMERGENCIA ACTIVADO ⛔⛔⛔");
   
@@ -245,7 +245,7 @@ void emergencyStopComplete() {
   digitalWrite(STATUS_LED, LOW);
 }
 
-// ======================= FUNCIÓN TRAYECTORIA COORDINADA MEJORADA =======================
+// ======================= FUNCIÓN TRAYECTORIA COORDINADA  =======================
 
 void moverTrayectoriaCoordinada(float target_deg[4], String direcciones, int velocidad, String estadoGarra) {
     if (!motoresActivos || emergencyStop || communicationDisabled) {
@@ -420,7 +420,7 @@ void moverTrayectoriaCoordinada(float target_deg[4], String direcciones, int vel
     commandInProgress = false;
 }
 
-// OPTIMIZACIÓN: Procesador de comandos más rápido CORREGIDO
+// OPTIMIZACIÓN: Procesador de comandos más rápido 
 void procesarComandoRapido(String cmd) {
   cmd.trim();
   if (cmd.length() == 0) return;
@@ -510,7 +510,7 @@ void procesarComandoRapido(String cmd) {
     return;
   }
   
-  // NUEVO COMANDO: Establecer cero de referencia
+  //  COMANDO: Establecer cero de referencia
   if (up == "ZERO" || up == "SETZERO") {
     setZeroReference();
     
@@ -525,7 +525,7 @@ void procesarComandoRapido(String cmd) {
     return;
   }
   
-  // NUEVO COMANDO: Mostrar estado actual
+  //  COMANDO: Mostrar estado actual
   if (up == "STATUS" || up == "POS") {
     Serial.println("📊 Estado actual de los motores:");
     for (int i = 0; i < 4; i++) {
@@ -578,7 +578,7 @@ void procesarComandoRapido(String cmd) {
       return;
     }
     
-    // Formato MEJORADO: TRAY:10,-10,20,-20,HHAA,500,ABRIR
+    // Formato: TRAY:10,-10,20,-20,HHAA,500,ABRIR
     // Los valores ahora son ángulos VIRTUALES (relativos al cero referencia)
     int start = 5;
     float targets[4];
@@ -704,7 +704,7 @@ void procesarComandosRapido() {
   }
 }
 
-// ======================= FUNCIONES RESTANTES (IGUALES PERO ACTUALIZADAS) =======================
+// ======================= FUNCIONES RESTANTES =======================
 
 void verificarConexionWiFi() {
   if (communicationDisabled) return;
@@ -858,7 +858,7 @@ void mantener_wifi() {
   }
 }
 
-// ======================= COMANDOS DE MOVIMIENTO ACTUALIZADOS =======================
+// ======================= COMANDOS DE MOVIMIENTO  =======================
 void procesarComando(String cmd) {
   cmd.trim();
   if (cmd.length() == 0) return;
