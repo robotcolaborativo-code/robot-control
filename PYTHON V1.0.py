@@ -173,7 +173,7 @@ class CobotApp(ctk.CTk):
         ctk.CTkButton(power_frame, text="⚙️ APAGAR (OFF)", fg_color="#d32f2f", 
                      command=lambda: self.send_command("OFF"), height=45).pack(side="left", padx=5, fill="x", expand=True)
 
-        # NUEVO: Botón para establecer cero de referencia
+        # Botón para establecer cero de referencia
         zero_frame = ctk.CTkFrame(left)
         zero_frame.pack(pady=10, fill="x", padx=10)
         
@@ -398,7 +398,7 @@ class CobotApp(ctk.CTk):
         
         ctk.CTkLabel(selection_frame, text="Trayectorias Guardadas:", font=("Arial",12)).pack(pady=5)
         
-        # Dropdown trayectorias guardadas - CREARLO AQUÍ
+        # Dropdown trayectorias guardadas 
         tray_keys = list(self.trayectorias.keys()) or ["Inicio"]
         self.tray_menu = ctk.CTkOptionMenu(selection_frame, variable=self.tray_var, 
                                           values=tray_keys, width=300, height=35,
@@ -768,7 +768,7 @@ class CobotApp(ctk.CTk):
         if not self.check_zero_before_move():
             return
             
-        # Leer valores de los campos (AHORA PUEDEN SER NEGATIVOS)
+        # Leer valores de los campos (PUEDEN SER NEGATIVOS)
         targets = []
         direcciones = ""
         
