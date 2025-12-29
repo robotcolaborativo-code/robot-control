@@ -56,7 +56,7 @@ const unsigned long WIFI_CHECK_INTERVAL = 20000;
 unsigned long lastCommandTime = 0;
 bool commandInProgress = false;
 
-// ======================= NUEVAS VARIABLES PARA PICK-AND-PLACE =======================
+// ======================= VARIABLES PARA PICK-AND-PLACE =======================
 bool ejecutandoPickAndPlace = false;
 bool primeraTrayectoriaCompletada = false;
 
@@ -124,7 +124,7 @@ void setup() {
   }
 }
 
-// ======================= NUEVAS FUNCIONES PARA SISTEMA DE COORDENADAS =======================
+// ======================= FUNCIONES PARA SISTEMA DE COORDENADAS =======================
 
 float normalizeAngle(float angle) {
   // Normalizar ángulo a rango -180 a 180
@@ -209,7 +209,7 @@ void loop() {
   delay(1);
 }
 
-// ======================= NUEVA FUNCIÓN: PARO DE EMERGENCIA COMPLETO =======================
+// ======================= FUNCIÓN: PARO DE EMERGENCIA COMPLETO =======================
 void emergencyStopComplete() {
   Serial.println("⛔⛔⛔ PARO DE EMERGENCIA ACTIVADO ⛔⛔⛔");
   
@@ -449,7 +449,7 @@ void procesarComandoPickAndPlace(String cmd) {
     delay((unsigned long)(delayTime * 1000));
   }
   
-  // 🔥 PUNTO CRÍTICO: ESTABLECER SISTEMA EN CERO
+  //  PUNTO CRÍTICO: ESTABLECER SISTEMA EN CERO
   Serial.println("🎯 ESTABLECIENDO SISTEMA EN CERO para segunda trayectoria...");
   setZeroReference();  // Establece posición actual como nuevo cero
   
@@ -473,7 +473,7 @@ void procesarComandoPickAndPlace(String cmd) {
   Serial.println("✅ Secuencia PICK-AND-PLACE completada exitosamente!");
 }
 
-// ======================= FUNCIÓN TRAYECTORIA COORDINADA MEJORADA =======================
+// ======================= FUNCIÓN TRAYECTORIA COORDINADA  =======================
 void moverTrayectoriaCoordinada(float target_deg[4], String direcciones, int velocidad, String estadoGarra, bool esSegundaTrayectoria) {
     if (!motoresActivos || emergencyStop || communicationDisabled) {
         Serial.println("⚠️ Motores no energizados, E-STOP activado o comunicaciones deshabilitadas");
@@ -676,7 +676,7 @@ void moverTrayectoriaCoordinada(float target_deg[4], String direcciones, int vel
     commandInProgress = false;
 }
 
-// OPTIMIZACIÓN: Procesador de comandos más rápido CORREGIDO
+// OPTIMIZACIÓN: Procesador de comandos más rápido 
 void procesarComandoRapido(String cmd) {
   cmd.trim();
   if (cmd.length() == 0) return;
@@ -774,7 +774,7 @@ void procesarComandoRapido(String cmd) {
     return;
   }
   
-  // NUEVO COMANDO: Establecer cero de referencia
+  //COMANDO: Establecer cero de referencia
   if (up == "ZERO" || up == "SETZERO") {
     setZeroReference();
     
@@ -789,7 +789,7 @@ void procesarComandoRapido(String cmd) {
     return;
   }
   
-  // NUEVO COMANDO: Mostrar estado actual
+  //COMANDO: Mostrar estado actual
   if (up == "STATUS" || up == "POS") {
     Serial.println("📊 Estado actual de los motores:");
     for (int i = 0; i < 4; i++) {
@@ -836,7 +836,7 @@ void procesarComandoRapido(String cmd) {
     return;
   }
 
-  // NUEVO COMANDO: PICK-AND-PLACE (secuencia combinada)
+  //COMANDO: PICK-AND-PLACE (secuencia combinada)
   if (up.startsWith("PICKPLACE:")) {
     // Verificar si las comunicaciones están activas
     if (communicationDisabled) {
@@ -874,7 +874,7 @@ void procesarComandoRapido(String cmd) {
       commandInProgress = false;
     }
   } else if (up.startsWith("POS:")) {
-    // NUEVO: Comando POS para mover a posición absoluta
+    //Comando POS para mover a posición absoluta
     procesarComando(cmd);
   } else if (up.startsWith("MODE:")) {
     procesarComando(cmd);
@@ -926,7 +926,7 @@ void procesarComandosRapido() {
   }
 }
 
-// ======================= FUNCIONES RESTANTES (IGUALES PERO ACTUALIZADAS) =======================
+// ======================= FUNCIONES RESTANTES =======================
 
 void verificarConexionWiFi() {
   if (communicationDisabled) return;
@@ -1080,7 +1080,7 @@ void mantener_wifi() {
   }
 }
 
-// ======================= COMANDOS DE MOVIMIENTO ACTUALIZADOS =======================
+// ======================= COMANDOS DE MOVIMIENTO =======================
 void procesarComando(String cmd) {
   cmd.trim();
   if (cmd.length() == 0) return;
@@ -1113,7 +1113,7 @@ void procesarComando(String cmd) {
     return;
   }
 
-  // NUEVO: Comando POS para posición absoluta
+  //Comando POS para posición absoluta
   if (up.startsWith("POS:")) {
     // Formato: POS:10,-10,20,-20,vel
     int start = 4;
