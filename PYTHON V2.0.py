@@ -280,7 +280,7 @@ class CobotApp(ctk.CTk):
         ctk.CTkLabel(warning_frame, text=warning_text, text_color="#000000", 
                     font=("Arial", 12, "bold")).pack(pady=8, padx=10)
 
-        # Frame para coordenadas (AHORA CON VALORES NEGATIVOS PERMITIDOS)
+        # Frame para coordenadas (VALORES NEGATIVOS PERMITIDOS)
         tray_frame = ctk.CTkFrame(tray_scroll_frame)
         tray_frame.pack(pady=15, padx=20, fill="x")
 
@@ -323,7 +323,7 @@ class CobotApp(ctk.CTk):
         garra_menu = ctk.CTkOptionMenu(config_frame, variable=self.tray_garra_var, values=["ABRIR", "CERRAR"], width=100)
         garra_menu.pack(side="left", padx=5)
 
-        # Botones de ejecución (NUEVOS: uno para trayectorias normales y otro para secuencias combinadas)
+        # Botones de ejecución (uno para trayectorias normales y otro para secuencias combinadas)
         ejecutar_frame = ctk.CTkFrame(tray_scroll_frame)
         ejecutar_frame.pack(pady=10)
 
@@ -469,7 +469,7 @@ class CobotApp(ctk.CTk):
         self.update_zero_display()
         self.update_trayectorias_info()
 
-    # ==================== NUEVAS FUNCIONES PARA TRAYECTORIAS COMBINADAS ====================
+    # ==================== FUNCIONES PARA TRAYECTORIAS COMBINADAS ====================
     
     def crear_trayectoria_pick_and_place(self):
         """Crear una trayectoria combinada pick-and-place"""
