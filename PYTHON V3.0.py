@@ -34,7 +34,7 @@ class CobotApp(ctk.CTk):
         self.zero_set = False
         self.current_virtual_pos = [0.0, 0.0, 0.0, 0.0]
         
-        # NUEVO: Control de ejecución en bucle
+        # Control de ejecución en bucle
         self.ejecutando_bucle = False
         self.bucle_thread = None
         self.repeticiones_bucle = 1
@@ -219,7 +219,7 @@ class CobotApp(ctk.CTk):
         self.emergency_label = ctk.CTkLabel(status_frame, text="", font=("Arial", 12, "bold"))
         self.emergency_label.pack(pady=5)
         
-        # NUEVO: Indicador de ejecución en bucle
+        # Indicador de ejecución en bucle
         self.bucle_label = ctk.CTkLabel(status_frame, text="", font=("Arial", 12))
         self.bucle_label.pack(pady=5)
 
@@ -333,7 +333,7 @@ class CobotApp(ctk.CTk):
         garra_menu = ctk.CTkOptionMenu(config_frame, variable=self.tray_garra_var, values=["ABRIR", "CERRAR"], width=100)
         garra_menu.pack(side="left", padx=5)
 
-        # NUEVO: Control de ejecución en bucle
+        # Control de ejecución en bucle
         bucle_frame = ctk.CTkFrame(tray_scroll_frame)
         bucle_frame.pack(pady=10, padx=20, fill="x")
         
@@ -352,7 +352,7 @@ class CobotApp(ctk.CTk):
         self.bucle_delay.insert(0, "1.0")
         self.bucle_delay.pack(side="left", padx=5)
         
-        # Botones de ejecución (NUEVOS: ahora con opción de bucle)
+        # Botones de ejecución (ahora con opción de bucle)
         ejecutar_frame = ctk.CTkFrame(tray_scroll_frame)
         ejecutar_frame.pack(pady=10)
 
@@ -468,7 +468,7 @@ class CobotApp(ctk.CTk):
         
         ctk.CTkLabel(selection_frame, text="Trayectorias Guardadas:", font=("Arial",12)).pack(pady=5)
         
-        # Dropdown trayectorias guardadas - CREARLO AQUÍ
+        # Dropdown trayectorias guardadas 
         tray_keys = list(self.trayectorias.keys()) or ["Inicio"]
         self.tray_menu = ctk.CTkOptionMenu(selection_frame, variable=self.tray_var, 
                                           values=tray_keys, width=300, height=35,
@@ -520,7 +520,7 @@ class CobotApp(ctk.CTk):
         self.update_bucle_display()
         self.update_trayectorias_info()
 
-    # ==================== FUNCIONES CORREGIDAS PARA EJECUCIÓN EN BUCLE ====================
+    # ==================== FUNCIONES PARA EJECUCIÓN EN BUCLE ====================
     
     def ejecutar_trayectoria_bucle(self):
         """Ejecutar trayectoria en bucle repetitivo"""
@@ -845,7 +845,7 @@ class CobotApp(ctk.CTk):
         # Iniciar el hilo
         threading.Thread(target=ejecutar_secuencia_thread, daemon=True).start()
     
-    # ==================== FUNCIÓN CORREGIDA PARA EJECUTAR TRAYECTORIAS ====================
+    # ==================== FUNCIÓN PARA EJECUTAR TRAYECTORIAS ====================
     
     def ejecutar_trayectoria_como_comando(self, tray):
         """Ejecutar una trayectoria desde su diccionario (corregida)"""
@@ -940,7 +940,7 @@ class CobotApp(ctk.CTk):
         else:
             self.bucle_label.configure(text="", text_color="gray")
     
-    # ==================== FUNCIONES EXISTENTES (MANTENIDAS) ====================
+    # ==================== FUNCIONES EXISTENTES  ====================
     
     def crear_trayectoria_pick_and_place(self):
         """Crear una trayectoria combinada pick-and-place"""
@@ -1216,7 +1216,7 @@ class CobotApp(ctk.CTk):
         if not self.check_zero_before_move():
             return
             
-        # Leer valores de los campos (AHORA PUEDEN SER NEGATIVOS)
+        # Leer valores de los campos (PUEDEN SER NEGATIVOS)
         targets = []
         direcciones = ""
         
